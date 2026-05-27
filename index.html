@@ -2954,9 +2954,9 @@ function getPeriodBuckets(period) {
     }
   }
 
-  // popula com os lançamentos
+  // popula com os lançamentos (paid + pending)
   state.finance.forEach(f => {
-    if (f.status !== 'paid') return;
+    if (f.status !== 'paid' && f.status !== 'pending') return;
     const bucket = buckets.find(b => b.match(f));
     if (bucket) {
       if (f.type === 'in') bucket.in += f.value;
