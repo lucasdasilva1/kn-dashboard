@@ -837,13 +837,11 @@ tbody tr:last-child td { border-bottom: none; }
   fill: var(--text-faint);
   letter-spacing: 0.06em;
 }
-.chart-svg .area-in  { fill: url(#gradIn); }
-.chart-svg .area-out { fill: url(#gradOut); }
-.chart-svg .line-in  { stroke: var(--success); stroke-width: 2.5; fill: none; stroke-linecap: round; stroke-linejoin: round; }
-.chart-svg .line-out { stroke: var(--danger);  stroke-width: 1.8; fill: none; stroke-linecap: round; stroke-linejoin: round; opacity: 0.65; }
-.chart-svg .dot-in   { fill: var(--bg-elevated); stroke: var(--success); stroke-width: 2; cursor: pointer; transition: r 0.12s; }
-.chart-svg .dot-out  { fill: var(--bg-elevated); stroke: var(--danger);  stroke-width: 2; cursor: pointer; transition: r 0.12s; }
-.chart-svg .dot-active { r: 5; }
+.chart-svg .line-in  { stroke: var(--success); stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.chart-svg .line-out { stroke: var(--danger);  stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.chart-svg .dot-in   { fill: var(--success); stroke: var(--bg-elevated); stroke-width: 2; cursor: pointer; transition: r 0.1s ease; }
+.chart-svg .dot-out  { fill: var(--danger);  stroke: var(--bg-elevated); stroke-width: 2; cursor: pointer; transition: r 0.1s ease; }
+.chart-svg .dot-in:hover, .chart-svg .dot-out:hover { r: 6; }
 .chart-svg .label-value {
   font-family: var(--mono);
   font-size: 10px;
@@ -1246,12 +1244,14 @@ tbody tr:last-child td { border-bottom: none; }
 .chart-legend-top span::before {
   content: '';
   width: 10px;
-  height: 2px;
+  height: 10px;
   display: inline-block;
+  border-radius: 50%;
+  border: 2px solid #fff;
 }
 
-.legend-in::before { background: var(--success); }
-.legend-out::before { background: var(--danger); border-top: 2px dashed var(--danger); }
+.legend-in::before  { background: var(--success); box-shadow: 0 0 0 1.5px var(--success); }
+.legend-out::before { background: var(--danger);  box-shadow: 0 0 0 1.5px var(--danger); }
 
 /* ============ PIPELINE ============ */
 .pipeline {
@@ -3005,27 +3005,17 @@ function renderLineChart() {
   const ptsIn  = buckets.map((m, i) => ({ x: xPos(i), y: yScale(m.in)  }));
   const ptsOut = buckets.map((m, i) => ({ x: xPos(i), y: yScale(m.out) }));
 
-  // só usa curva se tem pontos suficientes
-  const useCurve = buckets.length >= 3;
+  // Linhas retas estilo Hotmart
+  const linePath = pts => pts.map((p, j) => `${j === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
 
-  let html = `
-    <defs>
-      <linearGradient id="gradIn" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%"   stop-color="#2c8a4e" stop-opacity="0.18"/>
-        <stop offset="100%" stop-color="#2c8a4e" stop-opacity="0"/>
-      </linearGradient>
-      <linearGradient id="gradOut" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%"   stop-color="#d93030" stop-opacity="0.10"/>
-        <stop offset="100%" stop-color="#d93030" stop-opacity="0"/>
-      </linearGradient>
-    </defs>`;
+  let html = '';
 
-  // Apenas 3 gridlines horizontais — mais clean
-  for (let i = 0; i <= 3; i++) {
-    const y   = padT + (innerH / 3) * i;
-    const val = maxVal * (1 - i / 3);
+  // Gridlines — 4 linhas horizontais, clean
+  for (let i = 0; i <= 4; i++) {
+    const y   = padT + (innerH / 4) * i;
+    const val = maxVal * (1 - i / 4);
     html += `<line class="grid-line" x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}"/>`;
-    if (i < 3) {
+    if (i < 4) {
       html += `<text class="axis-label" x="${padL - 7}" y="${y + 3.5}" text-anchor="end">${fmtShort(val).replace('R$ ', '')}</text>`;
     }
   }
@@ -3038,44 +3028,24 @@ function renderLineChart() {
   });
 
   if (buckets.length > 1) {
-    const lineCurve = useCurve ? smoothCurve : (pts) =>
-      pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
-
-    // Área receita com curva suave fechada
-    const areaInCurve = useCurve ? smoothCurve(ptsIn) : lineCurve(ptsIn);
-    const areaInPath  = `${areaInCurve} L ${xPos(buckets.length-1)} ${padT+innerH} L ${xPos(0)} ${padT+innerH} Z`;
-    html += `<path class="area-in" d="${areaInPath}"/>`;
-
-    // Linha despesas (mais fina, levemente transparente)
-    html += `<path class="line-out" d="${lineCurve(ptsOut)}"/>`;
-
-    // Linha receita (destaque principal)
-    html += `<path class="line-in" d="${lineCurve(ptsIn)}"/>`;
+    // Despesas atrás, receita na frente
+    html += `<path class="line-out" d="${linePath(ptsOut)}"/>`;
+    html += `<path class="line-in"  d="${linePath(ptsIn)}"/>`;
   }
 
   // Hover line
   html += `<line class="hover-line" id="hoverLine" x1="0" y1="${padT}" x2="0" y2="${padT+innerH}"/>`;
 
-  // Dots: só mostra em modos com poucos pontos (mensal/anual/7d/15d)
-  const showDots = buckets.length <= 15;
-  if (showDots) {
-    buckets.forEach((m, i) => {
-      if (m.in > 0)  html += `<circle class="dot-in"  cx="${xPos(i)}" cy="${yScale(m.in)}"  r="3.5" data-idx="${i}"/>`;
-      if (m.out > 0) html += `<circle class="dot-out" cx="${xPos(i)}" cy="${yScale(m.out)}" r="3.5" data-idx="${i}"/>`;
-    });
-  }
+  // Dots em TODOS os pontos (estilo Hotmart — pontos sólidos com anel branco)
+  const dotR = buckets.length > 20 ? 3 : 4;
+  buckets.forEach((m, i) => {
+    html += `<circle class="dot-out" cx="${xPos(i).toFixed(1)}" cy="${yScale(m.out).toFixed(1)}" r="${dotR}" data-idx="${i}"/>`;
+    html += `<circle class="dot-in"  cx="${xPos(i).toFixed(1)}" cy="${yScale(m.in).toFixed(1)}"  r="${dotR}" data-idx="${i}"/>`;
+  });
 
-  // Dot de hover flutuante (aparece no hover independente do modo)
-  html += `<circle class="dot-in"  id="hDotIn"  cx="-99" cy="-99" r="4.5" style="display:none"/>`;
-  html += `<circle class="dot-out" id="hDotOut" cx="-99" cy="-99" r="4.5" style="display:none"/>`;
-
-  // Label valor no último ponto (mensal/anual/15d)
-  if (buckets.length <= 15) {
-    const last = buckets[buckets.length - 1];
-    if (last.in > 0) {
-      html += `<text class="label-value" x="${xPos(buckets.length-1)}" y="${yScale(last.in) - 10}" text-anchor="end">${fmtShort(last.in)}</text>`;
-    }
-  }
+  // Dot de hover flutuante
+  html += `<circle class="dot-in"  id="hDotIn"  cx="-99" cy="-99" r="${dotR+2}" style="display:none"/>`;
+  html += `<circle class="dot-out" id="hDotOut" cx="-99" cy="-99" r="${dotR+2}" style="display:none"/>`;
 
   // Hover zones
   buckets.forEach((m, i) => {
