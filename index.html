@@ -1918,7 +1918,7 @@ tbody tr:last-child td { border-bottom: none; }
             <div>
               <div class="chart-title">Receita por categoria</div>
               <div class="chart-value money-mask" id="catTotal">R$ 0</div>
-              <div class="chart-sub">distribuição mensal</div>
+              <div class="chart-sub">MRR por serviço</div>
             </div>
           </div>
           <div class="donut-wrap">
@@ -2937,8 +2937,8 @@ function getPeriodBuckets(period) {
       });
     }
   } else {
-    // mensal: últimos 6 meses
-    for (let i = 5; i >= 0; i--) {
+    // mensal: últimos 5 meses + atual + próximo (7 janelas para sempre mostrar o ciclo vigente)
+    for (let i = 5; i >= -1; i--) {
       const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
       buckets.push({
         key: `${d.getFullYear()}-${d.getMonth()}`,
@@ -3195,11 +3195,14 @@ function renderDonut() {
   const currentMonth = today.getMonth();
   const currentYear = today.getFullYear();
 
+  // Donut por serviço: usa MRR ativo de cada cliente (não filtra por mês — reflete portfólio atual)
   const byCat = {};
-  state.finance
-    .filter(f => f.type === 'in' && (f.status === 'paid' || f.status === 'pending'))
-    .filter(f => { const d = new Date(f.date); return d.getMonth()===currentMonth && d.getFullYear()===currentYear; })
-    .forEach(f => { byCat[f.category] = (byCat[f.category]||0) + f.value; });
+  state.clients
+    .filter(c => c.status === 'active' && c.fee > 0)
+    .forEach(c => {
+      const cat = (c.services && c.services.length > 0) ? c.services[0] : 'mensalidade';
+      byCat[cat] = (byCat[cat]||0) + c.fee;
+    });
 
   const catLabels = {
     // categorias de serviço
@@ -3234,7 +3237,7 @@ function renderDonut() {
 
   if (total === 0) {
     svg.innerHTML = `<circle cx="50" cy="50" r="40" fill="none" stroke="#e8e6e0" stroke-width="14"/>`;
-    legend.innerHTML = '<div style="color:var(--text-faint); font-style:italic; font-size:13px;">Sem receitas neste mês</div>';
+    legend.innerHTML = '<div style="color:var(--text-faint); font-style:italic; font-size:13px;">Nenhum cliente ativo com mensalidade.</div>';
     return;
   }
 
@@ -3281,8 +3284,21 @@ function renderOverview() {
   const currentYear = today.getFullYear();
 
   const monthRevenue = state.clients.filter(c=>c.status==='active').reduce((s,c)=>s+(c.fee||0),0);
-  const monthIn = state.finance.filter(f=>f.type==='in'&&f.status==='paid').filter(f=>{const d=new Date(f.date);return d.getMonth()===currentMonth&&d.getFullYear()===currentYear;}).reduce((s,f)=>s+f.value,0);
-  const monthOut = state.finance.filter(f=>f.type==='out'&&f.status==='paid').filter(f=>{const d=new Date(f.date);return d.getMonth()===currentMonth&&d.getFullYear()===currentYear;}).reduce((s,f)=>s+f.value,0);
+  // Receita e despesas: próximos 31 dias (captura pagamentos do ciclo atual independente do mês)
+  const next31 = new Date(today); next31.setDate(today.getDate() + 31);
+  const monthIn = state.finance
+    .filter(f=>f.type==='in'&&(f.status==='paid'||f.status==='pending'))
+    .filter(f=>{ const d=new Date(f.date+'T00:00:00'); return d>=today && d<=next31; })
+    .reduce((s,f)=>s+f.value,0);
+  const monthOut = state.finance
+    .filter(f=>f.type==='out'&&(f.status==='paid'||f.status==='pending'))
+    .filter(f=>{ const d=new Date(f.date+'T00:00:00'); return d>=today && d<=next31; })
+    .reduce((s,f)=>s+f.value,0);
+  // Receitas já pagas no mês corrente
+  const paidIn = state.finance
+    .filter(f=>f.type==='in'&&f.status==='paid')
+    .filter(f=>{ const d=new Date(f.date+'T00:00:00'); return d.getMonth()===currentMonth&&d.getFullYear()===currentYear; })
+    .reduce((s,f)=>s+f.value,0);
 
   document.getElementById('kpiGrid').innerHTML = `
     <div class="kpi featured">
@@ -3291,17 +3307,17 @@ function renderOverview() {
       <div class="kpi-trend">${state.clients.filter(c=>c.status==='active').length} clientes ativos</div>
     </div>
     <div class="kpi">
-      <div class="kpi-label">Receita · mês</div>
+      <div class="kpi-label">A receber · 30d</div>
       <div class="kpi-value success money-mask">${fmtShort(monthIn)}</div>
-      <div class="kpi-trend up">entrada confirmada</div>
+      <div class="kpi-trend up">${paidIn>0?'R$'+Math.round(paidIn).toLocaleString('pt-BR')+' já recebido':'aguardando pagamentos'}</div>
     </div>
     <div class="kpi">
-      <div class="kpi-label">Despesas · mês</div>
+      <div class="kpi-label">Despesas · 30d</div>
       <div class="kpi-value danger money-mask">${fmtShort(monthOut)}</div>
-      <div class="kpi-trend down">saída</div>
+      <div class="kpi-trend down">saída prevista</div>
     </div>
     <div class="kpi">
-      <div class="kpi-label">Lucro · mês</div>
+      <div class="kpi-label">Resultado · 30d</div>
       <div class="kpi-value money-mask ${monthIn-monthOut>=0?'success':'danger'}">${fmtShort(monthIn-monthOut)}</div>
       <div class="kpi-trend">margem ${monthIn>0?Math.round((monthIn-monthOut)/monthIn*100):0}%</div>
     </div>
