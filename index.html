@@ -3255,14 +3255,15 @@ function renderOverview() {
   const currentYear = today.getFullYear();
 
   const monthRevenue = state.clients.filter(c=>c.status==='active').reduce((s,c)=>s+(c.fee||0),0);
-  // Receita e despesas: próximos 31 dias (captura pagamentos do ciclo atual independente do mês)
+  // A receber: só entradas PENDENTES nos próximos 31 dias
   const next31 = new Date(today); next31.setDate(today.getDate() + 31);
   const monthIn = state.finance
-    .filter(f=>f.type==='in'&&(f.status==='paid'||f.status==='pending'))
+    .filter(f=>f.type==='in'&&f.status==='pending')
     .filter(f=>{ const d=new Date(f.date+'T00:00:00'); return d>=today && d<=next31; })
     .reduce((s,f)=>s+f.value,0);
+  // Despesas pendentes nos próximos 31 dias
   const monthOut = state.finance
-    .filter(f=>f.type==='out'&&(f.status==='paid'||f.status==='pending'))
+    .filter(f=>f.type==='out'&&f.status==='pending')
     .filter(f=>{ const d=new Date(f.date+'T00:00:00'); return d>=today && d<=next31; })
     .reduce((s,f)=>s+f.value,0);
   // Receitas já pagas no mês corrente
