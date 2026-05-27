@@ -1952,6 +1952,34 @@ tbody tr:last-child td { border-bottom: none; }
           <div id="concentrationStat"></div>
         </div>
       </div>
+
+      <!-- TABELA FATURAMENTO RECORRENTE -->
+      <div class="section">
+        <div class="section-header">
+          <h2 class="section-title">Faturamento <span class="dim">recorrente</span></h2>
+          <div class="page-meta money-mask" id="recurringTotalLabel">—</div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Cliente</th><th>Serviço</th><th>Vencimento</th><th>Valor</th><th>Status</th></tr></thead>
+            <tbody id="recurringTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- TABELA SERVIÇOS AVULSOS -->
+      <div class="section">
+        <div class="section-header">
+          <h2 class="section-title">Serviços <span class="dim">avulsos</span></h2>
+          <div class="page-meta money-mask" id="avulsoTotalLabel">—</div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Cliente</th><th>Descrição</th><th>Data</th><th>Valor</th><th>Status</th></tr></thead>
+            <tbody id="avulsoTableBody"></tbody>
+          </table>
+        </div>
+      </div>
     </div>
 
     <!-- ============ CLIENTS ============ -->
@@ -3254,7 +3282,22 @@ function renderOverview() {
   const currentMonth = today.getMonth();
   const currentYear = today.getFullYear();
 
-  const monthRevenue = state.clients.filter(c=>c.status==='active').reduce((s,c)=>s+(c.fee||0),0);
+  // MRR: soma dos lançamentos recorrentes (recurring=yes, type=in) do mês mais recente com dados
+  const recurringIn = state.finance.filter(f => f.recurring === 'yes' && f.type === 'in');
+  const recurringMonths = [...new Set(recurringIn.map(f => {
+    const d = new Date(f.date + 'T00:00:00');
+    return d.getFullYear() * 100 + d.getMonth();
+  }))].sort((a,b) => b - a);
+  let monthRevenue = 0;
+  if (recurringMonths.length > 0) {
+    const top = recurringMonths[0];
+    const mY = Math.floor(top / 100), mM = top % 100;
+    monthRevenue = recurringIn
+      .filter(f => { const d = new Date(f.date + 'T00:00:00'); return d.getFullYear() === mY && d.getMonth() === mM; })
+      .reduce((s, f) => s + f.value, 0);
+  } else {
+    monthRevenue = state.clients.filter(c => c.status === 'active').reduce((s,c) => s + (c.fee||0), 0);
+  }
   // A receber: só entradas PENDENTES nos próximos 31 dias
   const next31 = new Date(today); next31.setDate(today.getDate() + 31);
   const monthIn = state.finance
@@ -3276,7 +3319,7 @@ function renderOverview() {
     <div class="kpi featured">
       <div class="kpi-label">MRR · Recorrente</div>
       <div class="kpi-value money-mask">${fmtShort(monthRevenue)}</div>
-      <div class="kpi-trend">${state.clients.filter(c=>c.status==='active').length} clientes ativos</div>
+      <div class="kpi-trend">${recurringMonths.length > 0 ? 'base: lançamentos recorrentes' : 'base: fees cadastrados'} · ${state.clients.filter(c=>c.status==='active').length} clientes</div>
     </div>
     <div class="kpi">
       <div class="kpi-label">A receber · 30d</div>
@@ -3342,6 +3385,68 @@ function renderOverview() {
 
   document.getElementById('todayDate').textContent = today.toLocaleDateString('pt-BR',{day:'2-digit',month:'long',year:'numeric'});
   document.getElementById('footStats').textContent = `${state.clients.length} clientes · ${state.leads.length} leads`;
+  renderBillingTables();
+}
+
+// ============ TABELAS DE FATURAMENTO (PAINEL GERAL) ============
+function renderBillingTables() {
+  const CAT = {
+    meta:'Meta Ads', google:'Google Ads', crm:'CRM', funil:'Funil de Vendas',
+    treinamento:'Treinamento Comercial', social:'Social Mídia', artes:'Pacote de Artes',
+    videos:'Pacote de Vídeos', mensalidade:'Mensalidade', setup:'Setup',
+    ads:'Verba Ads', ferramentas:'Ferramentas', equipe:'Equipe',
+    marketing:'Marketing', impostos:'Impostos', outros:'Outros', outro:'Outro',
+  };
+  const fmtDate = d => new Date(d + 'T00:00:00').toLocaleDateString('pt-BR', {day:'2-digit', month:'short', year:'2-digit'});
+  const statusBadge = s => `<span class="badge ${s==='paid'?'badge-paid':s==='overdue'?'badge-overdue':'badge-pending'}">${s==='paid'?'Pago':s==='overdue'?'Atrasado':'Pendente'}</span>`;
+
+  // ── Recorrentes ────────────────────────────────────────
+  const recurring = [...state.finance]
+    .filter(f => f.recurring === 'yes' && f.type === 'in')
+    .sort((a, b) => new Date(b.date) - new Date(a.date));
+
+  const recurTotal = recurring.reduce((s, f) => s + f.value, 0);
+  document.getElementById('recurringTotalLabel').textContent = recurTotal > 0 ? fmt(recurTotal) : '—';
+
+  const recurBody = document.getElementById('recurringTableBody');
+  if (!recurring.length) {
+    recurBody.innerHTML = '<tr><td colspan="5" class="empty">Nenhum lançamento recorrente ainda.</td></tr>';
+  } else {
+    recurBody.innerHTML = recurring.map(f => {
+      const client = state.clients.find(c => c.id === f.clientId);
+      return `<tr>
+        <td><strong>${escapeHtml(client ? client.name : '—')}</strong></td>
+        <td>${CAT[f.category] || f.category || '—'}</td>
+        <td style="font-family:var(--mono);font-size:12px;color:var(--text-dim)">${fmtDate(f.date)}</td>
+        <td class="cell-money in money-mask">+${fmt(f.value)}</td>
+        <td>${statusBadge(f.status)}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  // ── Avulsos ───────────────────────────────────────────
+  const avulso = [...state.finance]
+    .filter(f => f.recurring !== 'yes' && f.type === 'in')
+    .sort((a, b) => new Date(b.date) - new Date(a.date));
+
+  const avulsoTotal = avulso.reduce((s, f) => s + f.value, 0);
+  document.getElementById('avulsoTotalLabel').textContent = avulsoTotal > 0 ? fmt(avulsoTotal) : '—';
+
+  const avulsoBody = document.getElementById('avulsoTableBody');
+  if (!avulso.length) {
+    avulsoBody.innerHTML = '<tr><td colspan="5" class="empty">Nenhum serviço avulso ainda.</td></tr>';
+  } else {
+    avulsoBody.innerHTML = avulso.map(f => {
+      const client = state.clients.find(c => c.id === f.clientId);
+      return `<tr>
+        <td><strong>${escapeHtml(client ? client.name : '—')}</strong></td>
+        <td style="color:var(--text-dim)">${escapeHtml(f.desc)}</td>
+        <td style="font-family:var(--mono);font-size:12px;color:var(--text-dim)">${fmtDate(f.date)}</td>
+        <td class="cell-money in money-mask">+${fmt(f.value)}</td>
+        <td>${statusBadge(f.status)}</td>
+      </tr>`;
+    }).join('');
+  }
 }
 
 // ============ CLIENTS ============
