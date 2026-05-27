@@ -1896,6 +1896,13 @@ tbody tr:last-child td { border-bottom: none; }
 
               <!-- CALENDAR POPUP -->
               <div class="cal-popup" id="calPopup" onclick="event.stopPropagation()">
+                <div style="display:flex;gap:6px;padding:12px 16px 0;flex-wrap:wrap;">
+                  <button class="btn" style="padding:4px 10px;font-size:11px;font-family:var(--mono)" onclick="calQuick(7)">7 dias</button>
+                  <button class="btn" style="padding:4px 10px;font-size:11px;font-family:var(--mono)" onclick="calQuick(15)">15 dias</button>
+                  <button class="btn" style="padding:4px 10px;font-size:11px;font-family:var(--mono)" onclick="calQuickMonth(0)">Este mês</button>
+                  <button class="btn" style="padding:4px 10px;font-size:11px;font-family:var(--mono)" onclick="calQuickMonth(1)">Próx. mês</button>
+                  <button class="btn" style="padding:4px 10px;font-size:11px;font-family:var(--mono)" onclick="calQuickMonth(-1)">Mês ant.</button>
+                </div>
                 <div class="cal-months" id="calMonths"></div>
                 <div class="cal-footer">
                   <div class="cal-selected-label" id="calLabel">Selecione o início do período</div>
@@ -2700,10 +2707,11 @@ let calState = {
 
 function openCalendar() {
   const today = new Date();
-  calState.rightYear  = today.getFullYear();
-  calState.rightMonth = today.getMonth();
-  calState.leftYear   = today.getMonth() === 0 ? today.getFullYear() - 1 : today.getFullYear();
-  calState.leftMonth  = today.getMonth() === 0 ? 11 : today.getMonth() - 1;
+  // Abre mostrando mês atual (esquerda) + próximo mês (direita)
+  calState.leftYear   = today.getFullYear();
+  calState.leftMonth  = today.getMonth();
+  calState.rightYear  = today.getMonth() === 11 ? today.getFullYear() + 1 : today.getFullYear();
+  calState.rightMonth = today.getMonth() === 11 ? 0 : today.getMonth() + 1;
   // preserve previous selection if any
   calState.start = customRangeFrom || null;
   calState.end   = customRangeTo   || null;
@@ -2784,6 +2792,25 @@ function calHoverDay(dateStr) {
 function calLeaveGrid() {
   if (calState.phase !== 'picking-end') return;
   calState.hover = null;
+  renderCalendar();
+}
+
+function calQuick(days) {
+  const today = new Date();
+  const end = new Date(today); end.setDate(today.getDate() + days - 1);
+  calState.start = today.toISOString().slice(0,10);
+  calState.end   = end.toISOString().slice(0,10);
+  calState.phase = 'idle';
+  renderCalendar();
+}
+function calQuickMonth(offset) {
+  const today = new Date();
+  const d = new Date(today.getFullYear(), today.getMonth() + offset, 1);
+  const start = new Date(d.getFullYear(), d.getMonth(), 1);
+  const end   = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+  calState.start = start.toISOString().slice(0,10);
+  calState.end   = end.toISOString().slice(0,10);
+  calState.phase = 'idle';
   renderCalendar();
 }
 
