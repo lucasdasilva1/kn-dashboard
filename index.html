@@ -3388,21 +3388,27 @@ function renderOverview() {
   } else {
     monthRevenue = state.clients.filter(c => c.status === 'active').reduce((s,c) => s + (c.fee||0), 0);
   }
-  // A receber: só entradas PENDENTES nos próximos 31 dias
+  // A receber: entradas PENDENTES nos próximos 31 dias
   const next31 = new Date(today); next31.setDate(today.getDate() + 31);
+  const last30  = new Date(today); last30.setDate(today.getDate() - 30);
   const monthIn = state.finance
     .filter(f=>f.type==='in'&&f.status==='pending')
     .filter(f=>{ const d=new Date(f.date+'T00:00:00'); return d>=today && d<=next31; })
     .reduce((s,f)=>s+f.value,0);
-  // Despesas pendentes nos próximos 31 dias
+  // Despesas PAGAS nos últimos 30 dias (caixa real saído)
   const monthOut = state.finance
-    .filter(f=>f.type==='out'&&f.status==='pending')
-    .filter(f=>{ const d=new Date(f.date+'T00:00:00'); return d>=today && d<=next31; })
+    .filter(f=>f.type==='out'&&f.status==='paid')
+    .filter(f=>{ const d=new Date(getEffectiveDate(f)+'T00:00:00'); return d>=last30 && d<=today; })
     .reduce((s,f)=>s+f.value,0);
-  // Receitas já pagas no mês corrente
+  // Receitas PAGAS nos últimos 30 dias (para Resultado)
+  const paidInLast30 = state.finance
+    .filter(f=>f.type==='in'&&f.status==='paid')
+    .filter(f=>{ const d=new Date(getEffectiveDate(f)+'T00:00:00'); return d>=last30 && d<=today; })
+    .reduce((s,f)=>s+f.value,0);
+  // Receitas pagas no mês corrente (subtítulo "A receber")
   const paidIn = state.finance
     .filter(f=>f.type==='in'&&f.status==='paid')
-    .filter(f=>{ const d=new Date(f.date+'T00:00:00'); return d.getMonth()===currentMonth&&d.getFullYear()===currentYear; })
+    .filter(f=>{ const d=new Date(getEffectiveDate(f)+'T00:00:00'); return d.getMonth()===currentMonth&&d.getFullYear()===currentYear; })
     .reduce((s,f)=>s+f.value,0);
 
   document.getElementById('kpiGrid').innerHTML = `
@@ -3419,12 +3425,12 @@ function renderOverview() {
     <div class="kpi">
       <div class="kpi-label">Despesas · 30d</div>
       <div class="kpi-value danger money-mask">${fmtShort(monthOut)}</div>
-      <div class="kpi-trend down">saída prevista</div>
+      <div class="kpi-trend down">${monthOut>0?'saídas reais · últimos 30 dias':'sem despesas pagas'}</div>
     </div>
     <div class="kpi">
       <div class="kpi-label">Resultado · 30d</div>
-      <div class="kpi-value money-mask ${monthIn-monthOut>=0?'success':'danger'}">${fmtShort(monthIn-monthOut)}</div>
-      <div class="kpi-trend">margem ${monthIn>0?Math.round((monthIn-monthOut)/monthIn*100):0}%</div>
+      <div class="kpi-value money-mask ${paidInLast30-monthOut>=0?'success':'danger'}">${fmtShort(paidInLast30-monthOut)}</div>
+      <div class="kpi-trend">margem ${paidInLast30>0?Math.round((paidInLast30-monthOut)/paidInLast30*100):0}%</div>
     </div>
   `;
 
