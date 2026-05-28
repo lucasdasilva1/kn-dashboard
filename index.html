@@ -2586,11 +2586,14 @@ function saveFinance(e) { e.preventDefault();
   let paidDate = null;
   if (newStatus === 'paid') {
     if (!prev) {
-      paidDate = entryDate; // nova entrada: data informada
+      // nova entrada: usa a data informada, mas se for futura, corrige pro mês recente
+      paidDate = _shiftFutureToRecent(entryDate);
     } else if (prev.status !== 'paid') {
-      paidDate = new Date().toISOString().slice(0,10); // mudou para pago agora
+      // mudou de pendente → pago agora: usa o mesmo dia mas no mês correto
+      paidDate = _shiftFutureToRecent(entryDate);
     } else {
-      paidDate = prev.paidDate || prev.date; // já era pago: preserva
+      // já era pago: preserva paidDate anterior (não muda)
+      paidDate = prev.paidDate || _shiftFutureToRecent(prev.date);
     }
   }
   const data = { id, type: document.getElementById('finance-type').value, desc: document.getElementById('finance-desc').value, value: parseFloat(document.getElementById('finance-value').value), date: entryDate, category: document.getElementById('finance-category').value, clientId: document.getElementById('finance-client').value||null, status: newStatus, recurring: document.getElementById('finance-recurring').value, paidDate };
@@ -2940,30 +2943,23 @@ function renderCalendar() {
   });
 }
 
-// Retorna a data efetiva de uma entrada para fins de gráfico:
-// - se tem paidDate → usa paidDate (fonte de verdade)
-// - se está pago mas a data de vencimento é FUTURA e sem paidDate:
-//   usa o mesmo DIA do mês mas no mês atual (ou anterior se o dia ainda não chegou)
-//   ex: vencimento 01/jun → considera 01/mai; vencimento 26/jun → 26/mai
-// - caso contrário → usa a data de vencimento (date)
+// Retorna a data efetiva de uma entrada para fins de gráfico.
+// Para entradas PAGAS: se a data efetiva (paidDate ou date) for no futuro,
+// transpõe para o mesmo dia no mês atual ou anterior (mais recente já passado).
+// Isso evita que entradas pré-datadas mas marcadas como pagas apareçam em meses futuros.
+function _shiftFutureToRecent(dateStr) {
+  const todayStr = new Date().toISOString().slice(0,10);
+  if (dateStr <= todayStr) return dateStr; // já é passado/hoje, não mexe
+  const day = parseInt(dateStr.slice(8, 10), 10);
+  const today = new Date(); today.setHours(0,0,0,0);
+  let corrected = new Date(today.getFullYear(), today.getMonth(), day);
+  if (corrected > today) corrected = new Date(today.getFullYear(), today.getMonth() - 1, day);
+  return corrected.toISOString().slice(0, 10);
+}
 function getEffectiveDate(f) {
-  if (f.paidDate) return f.paidDate;
-  if (f.status === 'paid') {
-    const todayStr = new Date().toISOString().slice(0,10);
-    if (f.date > todayStr) {
-      // data futura: transpõe para o mesmo dia no mês mais recente já passado
-      const day = parseInt(f.date.slice(8, 10), 10);
-      const today = new Date(); today.setHours(0,0,0,0);
-      // tenta mesmo dia no mês atual
-      let corrected = new Date(today.getFullYear(), today.getMonth(), day);
-      // se esse dia ainda não chegou neste mês, vai pro mês anterior
-      if (corrected > today) {
-        corrected = new Date(today.getFullYear(), today.getMonth() - 1, day);
-      }
-      return corrected.toISOString().slice(0, 10);
-    }
-  }
-  return f.date;
+  if (f.status !== 'paid') return f.date;
+  const base = f.paidDate || f.date;
+  return _shiftFutureToRecent(base);
 }
 
 function makeDayBucket(d) {
