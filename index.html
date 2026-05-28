@@ -3434,14 +3434,26 @@ function renderOverview() {
   renderLineChart();
   renderDonut();
 
-  // alerts
+  // alerts — baseados em lançamentos PENDENTES reais (não em projeção de fee/payday)
   const alerts = [];
-  state.clients.filter(c=>c.status==='active').forEach(c => {
-    let dueDate = new Date(currentYear, currentMonth, c.payday);
-    if (dueDate < today) dueDate = new Date(currentYear, currentMonth+1, c.payday);
-    const days = Math.ceil((dueDate-today)/(1000*60*60*24));
-    if (days>=0 && days<=7) alerts.push({ type: days<=2?'danger':'warn', kind:'Pagamento', title:c.name, meta: days===0?'Hoje · <span class="money-mask">'+fmt(c.fee)+'</span>' : days===1?'Amanhã · <span class="money-mask">'+fmt(c.fee)+'</span>' : `Em ${days} dias · <span class="money-mask">${fmt(c.fee)}</span>` });
-  });
+  const next14 = new Date(today); next14.setDate(today.getDate() + 14);
+  state.finance
+    .filter(f => f.status === 'pending' || f.status === 'overdue')
+    .forEach(f => {
+      const dueDate = new Date(f.date + 'T00:00:00');
+      const days = Math.ceil((dueDate - today) / (1000 * 60 * 60 * 24));
+      if (days > 14) return; // só mostra até 14 dias à frente
+      const client = state.clients.find(c => c.id === f.clientId);
+      const title = client ? client.name : f.desc;
+      const isOverdue = f.status === 'overdue' || days < 0;
+      const kind = f.type === 'in' ? 'Pagamento' : 'Despesa';
+      let meta;
+      if (days < 0)      meta = `Atrasado ${Math.abs(days)} dia(s) · <span class="money-mask">${fmt(f.value)}</span>`;
+      else if (days === 0) meta = `Hoje · <span class="money-mask">${fmt(f.value)}</span>`;
+      else if (days === 1) meta = `Amanhã · <span class="money-mask">${fmt(f.value)}</span>`;
+      else                 meta = `Em ${days} dias · <span class="money-mask">${fmt(f.value)}</span>`;
+      alerts.push({ type: isOverdue || days <= 2 ? 'danger' : 'warn', kind, title, meta });
+    });
   state.contracts.forEach(ct => {
     const days = daysUntil(ct.end);
     const client = state.clients.find(c=>c.id===ct.clientId);
