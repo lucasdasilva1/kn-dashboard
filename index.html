@@ -1885,6 +1885,7 @@ tbody tr:last-child td { border-bottom: none; }
                 <button class="period-btn" data-period="daily">30d</button>
                 <button class="period-btn active" data-period="monthly">6m</button>
                 <button class="period-btn" data-period="yearly">12m</button>
+                <button class="period-btn" data-period="mrr">MRR</button>
                 <button class="period-btn period-custom" data-period="custom" title="Período personalizado">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12" style="display:block"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
                 </button>
@@ -2574,7 +2575,25 @@ function saveClient(e) { e.preventDefault();
 }
 function saveFinance(e) { e.preventDefault();
   const id = document.getElementById('finance-id').value || uid();
-  const data = { id, type: document.getElementById('finance-type').value, desc: document.getElementById('finance-desc').value, value: parseFloat(document.getElementById('finance-value').value), date: document.getElementById('finance-date').value, category: document.getElementById('finance-category').value, clientId: document.getElementById('finance-client').value||null, status: document.getElementById('finance-status').value, recurring: document.getElementById('finance-recurring').value };
+  const newStatus = document.getElementById('finance-status').value;
+  const entryDate = document.getElementById('finance-date').value;
+  const prev = state.finance.find(f => f.id === id);
+  // paidDate: data em que o pagamento foi de fato recebido/confirmado
+  // - nova entrada já marcada como paga → usa a data que o usuário informou
+  // - entrada que mudou de pendente/atrasado para paga → usa hoje
+  // - entrada que já era paga → preserva paidDate anterior
+  // - entrada não paga → null
+  let paidDate = null;
+  if (newStatus === 'paid') {
+    if (!prev) {
+      paidDate = entryDate; // nova entrada: data informada
+    } else if (prev.status !== 'paid') {
+      paidDate = new Date().toISOString().slice(0,10); // mudou para pago agora
+    } else {
+      paidDate = prev.paidDate || prev.date; // já era pago: preserva
+    }
+  }
+  const data = { id, type: document.getElementById('finance-type').value, desc: document.getElementById('finance-desc').value, value: parseFloat(document.getElementById('finance-value').value), date: entryDate, category: document.getElementById('finance-category').value, clientId: document.getElementById('finance-client').value||null, status: newStatus, recurring: document.getElementById('finance-recurring').value, paidDate };
   const idx = state.finance.findIndex(f=>f.id===id); if(idx>=0) state.finance[idx]=data; else state.finance.push(data);
   save(); closeModal(); renderAll();
 }
@@ -2929,7 +2948,7 @@ function makeDayBucket(d) {
     fullLabel: d.toLocaleDateString('pt-BR', { day:'2-digit', month:'short', year:'numeric' }),
     showLabel: true,
     date: new Date(d),
-    match: (f) => f.date === d.toISOString().slice(0,10),
+    match: (f) => { const fd = f.paidDate || f.date; return fd === d.toISOString().slice(0,10); },
     in: 0,
     out: 0
   };
@@ -2957,9 +2976,9 @@ function getPeriodBuckets(period) {
       days = 15;
       startDate = new Date(today); startDate.setDate(startDate.getDate() - 5);
     } else {
-      // 30D: olha para frente (próximos 30 dias) — ideal para ver pagamentos futuros
+      // 30D: últimos 30 dias (só entradas pagas, sem projeções futuras)
       days = 30;
-      startDate = new Date(today);
+      startDate = new Date(today); startDate.setDate(startDate.getDate() - 29);
     }
 
     for (let i = 0; i < days; i++) {
@@ -2987,14 +3006,14 @@ function getPeriodBuckets(period) {
         showLabel: true,
         year: d.getFullYear(),
         month: d.getMonth(),
-        match: (f) => { const x = new Date(f.date+'T00:00:00'); return x.getFullYear() === d.getFullYear() && x.getMonth() === d.getMonth(); },
+        match: (f) => { const fd = f.paidDate || f.date; const x = new Date(fd+'T00:00:00'); return x.getFullYear() === d.getFullYear() && x.getMonth() === d.getMonth(); },
         in: 0,
         out: 0
       });
     }
-  } else {
-    // mensal: últimos 5 meses + atual + próximo (7 janelas para sempre mostrar o ciclo vigente)
-    for (let i = 5; i >= -1; i--) {
+  } else if (period === 'mrr') {
+    // MRR: últimos 6 meses de receitas recorrentes (sem mês futuro)
+    for (let i = 5; i >= 0; i--) {
       const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
       buckets.push({
         key: `${d.getFullYear()}-${d.getMonth()}`,
@@ -3003,16 +3022,33 @@ function getPeriodBuckets(period) {
         showLabel: true,
         year: d.getFullYear(),
         month: d.getMonth(),
-        match: (f) => { const x = new Date(f.date+'T00:00:00'); return x.getFullYear() === d.getFullYear() && x.getMonth() === d.getMonth(); },
+        match: (f) => { const fd = f.paidDate || f.date; const x = new Date(fd+'T00:00:00'); return x.getFullYear() === d.getFullYear() && x.getMonth() === d.getMonth(); },
+        in: 0,
+        out: 0
+      });
+    }
+  } else {
+    // mensal: últimos 5 meses + atual (6 janelas — sem mês futuro)
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
+      buckets.push({
+        key: `${d.getFullYear()}-${d.getMonth()}`,
+        label: d.toLocaleDateString('pt-BR',{month:'short'}).replace('.','').toUpperCase(),
+        fullLabel: d.toLocaleDateString('pt-BR',{month:'long', year:'numeric'}),
+        showLabel: true,
+        year: d.getFullYear(),
+        month: d.getMonth(),
+        match: (f) => { const fd = f.paidDate || f.date; const x = new Date(fd+'T00:00:00'); return x.getFullYear() === d.getFullYear() && x.getMonth() === d.getMonth(); },
         in: 0,
         out: 0
       });
     }
   }
 
-  // popula com os lançamentos (paid + pending)
+  // popula apenas com lançamentos PAGOS (sem projeções futuras)
   state.finance.forEach(f => {
-    if (f.status !== 'paid' && f.status !== 'pending') return;
+    if (f.status !== 'paid') return;
+    if (period === 'mrr' && f.recurring !== 'yes') return; // MRR: só recorrentes
     const bucket = buckets.find(b => b.match(f));
     if (bucket) {
       if (f.type === 'in') bucket.in += f.value;
@@ -3188,10 +3224,11 @@ function renderLineChart() {
   const totalIn = buckets.reduce((s,m)=>s+m.in,0);
   const totalOut = buckets.reduce((s,m)=>s+m.out,0);
   let periodLabel;
-  if (chartPeriod === 'daily')        periodLabel = 'próximos 30 dias';
+  if (chartPeriod === 'daily')        periodLabel = 'últimos 30 dias';
   else if (chartPeriod === 'yearly')  periodLabel = 'últimos 12 meses';
-  else if (chartPeriod === '7d')      periodLabel = '7 dias';
-  else if (chartPeriod === '15d')     periodLabel = '15 dias';
+  else if (chartPeriod === '7d')      periodLabel = 'últimos 7 dias';
+  else if (chartPeriod === '15d')     periodLabel = 'últimos 15 dias';
+  else if (chartPeriod === 'mrr')     periodLabel = 'receita recorrente mensal';
   else if (chartPeriod === 'custom' && customRangeFrom && customRangeTo) {
     const fmtD = d => new Date(d+'T00:00:00').toLocaleDateString('pt-BR', {day:'2-digit', month:'short'});
     periodLabel = `${fmtD(customRangeFrom)} – ${fmtD(customRangeTo)}`;
@@ -3673,13 +3710,13 @@ function seedIfEmpty() {
     // 6 meses de histórico para gráfico
     state.finance = [];
     for (let m = 5; m >= 0; m--) {
-      state.finance.push({ id: uid(), type:'in', desc:'Mensalidade Roupa Boa', value: 4500 + (Math.random()*500-250), date: monthAgo(m, 5), category:'mensalidade', clientId:state.clients[0].id, status:'paid', recurring:'yes' });
-      state.finance.push({ id: uid(), type:'in', desc:'Mensalidade Sorriso+', value: 3200, date: monthAgo(m, 10), category:'mensalidade', clientId:state.clients[1].id, status:'paid', recurring:'yes' });
-      state.finance.push({ id: uid(), type:'in', desc:'Mensalidade Imobiliária', value: 5800, date: monthAgo(m, 15), category:'mensalidade', clientId:state.clients[2].id, status:'paid', recurring:'yes' });
-      if (m % 2 === 0) state.finance.push({ id: uid(), type:'in', desc:'Setup novo cliente', value: 2500, date: monthAgo(m, 20), category:'setup', clientId:null, status:'paid', recurring:'no' });
-      state.finance.push({ id: uid(), type:'out', desc:'Ferramentas SaaS', value: 480 + Math.random()*100, date: monthAgo(m, 3), category:'ferramentas', clientId:null, status:'paid', recurring:'yes' });
-      state.finance.push({ id: uid(), type:'out', desc:'Designer freelance', value: 1800, date: monthAgo(m, 7), category:'equipe', clientId:null, status:'paid', recurring:'no' });
-      if (m === 0 || m === 3) state.finance.push({ id: uid(), type:'out', desc:'Impostos trimestrais', value: 1450, date: monthAgo(m, 25), category:'impostos', clientId:null, status:'paid', recurring:'no' });
+      state.finance.push({ id: uid(), type:'in', desc:'Mensalidade Roupa Boa', value: 4500 + (Math.random()*500-250), date: monthAgo(m, 5), paidDate: monthAgo(m, 5), category:'mensalidade', clientId:state.clients[0].id, status:'paid', recurring:'yes' });
+      state.finance.push({ id: uid(), type:'in', desc:'Mensalidade Sorriso+', value: 3200, date: monthAgo(m, 10), paidDate: monthAgo(m, 10), category:'mensalidade', clientId:state.clients[1].id, status:'paid', recurring:'yes' });
+      state.finance.push({ id: uid(), type:'in', desc:'Mensalidade Imobiliária', value: 5800, date: monthAgo(m, 15), paidDate: monthAgo(m, 15), category:'mensalidade', clientId:state.clients[2].id, status:'paid', recurring:'yes' });
+      if (m % 2 === 0) state.finance.push({ id: uid(), type:'in', desc:'Setup novo cliente', value: 2500, date: monthAgo(m, 20), paidDate: monthAgo(m, 20), category:'setup', clientId:null, status:'paid', recurring:'no' });
+      state.finance.push({ id: uid(), type:'out', desc:'Ferramentas SaaS', value: 480 + Math.random()*100, date: monthAgo(m, 3), paidDate: monthAgo(m, 3), category:'ferramentas', clientId:null, status:'paid', recurring:'yes' });
+      state.finance.push({ id: uid(), type:'out', desc:'Designer freelance', value: 1800, date: monthAgo(m, 7), paidDate: monthAgo(m, 7), category:'equipe', clientId:null, status:'paid', recurring:'no' });
+      if (m === 0 || m === 3) state.finance.push({ id: uid(), type:'out', desc:'Impostos trimestrais', value: 1450, date: monthAgo(m, 25), paidDate: monthAgo(m, 25), category:'impostos', clientId:null, status:'paid', recurring:'no' });
     }
 
     // Lançamentos extras espalhados nos últimos 30 dias pro modo Diário ter detalhe
@@ -3701,9 +3738,10 @@ function seedIfEmpty() {
     ];
     recentExtras.forEach(e => {
       const d = new Date(today); d.setDate(d.getDate() - e.daysAgo);
+      const ds = d.toISOString().slice(0,10);
       state.finance.push({
         id: uid(), type: e.type, desc: e.desc, value: e.value,
-        date: d.toISOString().slice(0,10), category: e.category,
+        date: ds, paidDate: ds, category: e.category,
         clientId: e.clientId, status: 'paid', recurring: 'no'
       });
     });
