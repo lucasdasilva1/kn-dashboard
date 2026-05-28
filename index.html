@@ -2940,6 +2940,20 @@ function renderCalendar() {
   });
 }
 
+// Retorna a data efetiva de uma entrada para fins de gráfico:
+// - se tem paidDate, usa paidDate
+// - se está pago mas sem paidDate e a data de vencimento é FUTURA → usa hoje
+//   (evita que entradas pré-datadas mas já marcadas como pagas apareçam em meses futuros)
+// - caso contrário, usa a data de vencimento (date)
+function getEffectiveDate(f) {
+  if (f.paidDate) return f.paidDate;
+  if (f.status === 'paid') {
+    const todayStr = new Date().toISOString().slice(0,10);
+    if (f.date > todayStr) return todayStr; // data futura → considera recebido hoje
+  }
+  return f.date;
+}
+
 function makeDayBucket(d) {
   d.setHours(0,0,0,0);
   return {
@@ -2948,7 +2962,7 @@ function makeDayBucket(d) {
     fullLabel: d.toLocaleDateString('pt-BR', { day:'2-digit', month:'short', year:'numeric' }),
     showLabel: true,
     date: new Date(d),
-    match: (f) => { const fd = f.paidDate || f.date; return fd === d.toISOString().slice(0,10); },
+    match: (f) => getEffectiveDate(f) === d.toISOString().slice(0,10),
     in: 0,
     out: 0
   };
@@ -3006,7 +3020,7 @@ function getPeriodBuckets(period) {
         showLabel: true,
         year: d.getFullYear(),
         month: d.getMonth(),
-        match: (f) => { const fd = f.paidDate || f.date; const x = new Date(fd+'T00:00:00'); return x.getFullYear() === d.getFullYear() && x.getMonth() === d.getMonth(); },
+        match: (f) => { const x = new Date(getEffectiveDate(f)+'T00:00:00'); return x.getFullYear() === d.getFullYear() && x.getMonth() === d.getMonth(); },
         in: 0,
         out: 0
       });
@@ -3022,7 +3036,7 @@ function getPeriodBuckets(period) {
         showLabel: true,
         year: d.getFullYear(),
         month: d.getMonth(),
-        match: (f) => { const fd = f.paidDate || f.date; const x = new Date(fd+'T00:00:00'); return x.getFullYear() === d.getFullYear() && x.getMonth() === d.getMonth(); },
+        match: (f) => { const x = new Date(getEffectiveDate(f)+'T00:00:00'); return x.getFullYear() === d.getFullYear() && x.getMonth() === d.getMonth(); },
         in: 0,
         out: 0
       });
@@ -3038,7 +3052,7 @@ function getPeriodBuckets(period) {
         showLabel: true,
         year: d.getFullYear(),
         month: d.getMonth(),
-        match: (f) => { const fd = f.paidDate || f.date; const x = new Date(fd+'T00:00:00'); return x.getFullYear() === d.getFullYear() && x.getMonth() === d.getMonth(); },
+        match: (f) => { const x = new Date(getEffectiveDate(f)+'T00:00:00'); return x.getFullYear() === d.getFullYear() && x.getMonth() === d.getMonth(); },
         in: 0,
         out: 0
       });
