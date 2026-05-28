@@ -2941,15 +2941,27 @@ function renderCalendar() {
 }
 
 // Retorna a data efetiva de uma entrada para fins de gráfico:
-// - se tem paidDate, usa paidDate
-// - se está pago mas sem paidDate e a data de vencimento é FUTURA → usa hoje
-//   (evita que entradas pré-datadas mas já marcadas como pagas apareçam em meses futuros)
-// - caso contrário, usa a data de vencimento (date)
+// - se tem paidDate → usa paidDate (fonte de verdade)
+// - se está pago mas a data de vencimento é FUTURA e sem paidDate:
+//   usa o mesmo DIA do mês mas no mês atual (ou anterior se o dia ainda não chegou)
+//   ex: vencimento 01/jun → considera 01/mai; vencimento 26/jun → 26/mai
+// - caso contrário → usa a data de vencimento (date)
 function getEffectiveDate(f) {
   if (f.paidDate) return f.paidDate;
   if (f.status === 'paid') {
     const todayStr = new Date().toISOString().slice(0,10);
-    if (f.date > todayStr) return todayStr; // data futura → considera recebido hoje
+    if (f.date > todayStr) {
+      // data futura: transpõe para o mesmo dia no mês mais recente já passado
+      const day = parseInt(f.date.slice(8, 10), 10);
+      const today = new Date(); today.setHours(0,0,0,0);
+      // tenta mesmo dia no mês atual
+      let corrected = new Date(today.getFullYear(), today.getMonth(), day);
+      // se esse dia ainda não chegou neste mês, vai pro mês anterior
+      if (corrected > today) {
+        corrected = new Date(today.getFullYear(), today.getMonth() - 1, day);
+      }
+      return corrected.toISOString().slice(0, 10);
+    }
   }
   return f.date;
 }
