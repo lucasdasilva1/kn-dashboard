@@ -3835,7 +3835,8 @@ function renderFinance() {
         if (!hasEntry) {
           const dueDay = Math.min(c.payday || 1, new Date(range.end).getDate());
           const dueDate = new Date(range.start.getFullYear(), range.start.getMonth(), dueDay);
-          // Busca a última entrada recorrente para pegar a descrição e valor reais
+          // Projeção usa o fee ATUAL do cliente (atualizado quando você editar o cadastro).
+          // Descrição e categoria vêm da última entrada recorrente histórica.
           const lastRecurring = [...state.finance]
             .filter(f => f.type === 'in' && f.recurring === 'yes' && f.clientId === c.id)
             .sort((a, b) => new Date(b.paidDate || b.date) - new Date(a.paidDate || a.date))[0];
@@ -3843,7 +3844,7 @@ function renderFinance() {
             _projected: true,
             clientId: c.id,
             desc: lastRecurring ? lastRecurring.desc : `Mensalidade ${c.name}`,
-            value: lastRecurring ? lastRecurring.value : c.fee,
+            value: c.fee, // sempre usa o fee atual — mude o cadastro para ajustar a projeção
             date: dueDate.toISOString().slice(0, 10),
             category: lastRecurring ? lastRecurring.category : ((c.services && c.services.length > 0) ? c.services[0] : 'mensalidade'),
             recurring: 'yes',
@@ -3901,24 +3902,21 @@ function renderFinance() {
   }).join('');
 }
 
-// Confirma pagamento de uma projeção: cria lançamento real como pago e re-renderiza
+// Confirma pagamento de uma projeção: abre o modal pré-preenchido para o usuário
+// confirmar/ajustar o valor antes de salvar (útil para clientes com valor variável)
 function confirmProjection(clientId, desc, value, date, category) {
-  const todayStr = new Date().toISOString().slice(0, 10);
-  const entry = {
-    id: uid(),
-    type: 'in',
-    desc: desc,
-    value: value,
-    date: date,
-    paidDate: todayStr,
-    category: category,
-    clientId: clientId,
-    status: 'paid',
-    recurring: 'yes',
-  };
-  state.finance.push(entry);
-  save();
-  renderAll();
+  // Pré-preenche e abre o modal de receita
+  openModal('finance-in');
+  setTimeout(() => {
+    document.getElementById('finance-desc').value    = desc;
+    document.getElementById('finance-value').value   = value;
+    document.getElementById('finance-date').value    = date;
+    document.getElementById('finance-category').value = category;
+    document.getElementById('finance-client').value  = clientId || '';
+    document.getElementById('finance-status').value  = 'paid';
+    document.getElementById('finance-recurring').value = 'yes';
+    document.getElementById('finance-type').value    = 'in';
+  }, 50);
 }
 
 // ============ CRM ============
