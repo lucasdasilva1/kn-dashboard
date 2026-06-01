@@ -1996,6 +1996,18 @@ tbody tr:last-child td { border-bottom: none; }
         <h1 class="page-title">Carteira <span class="dim">de clientes</span></h1>
         <button class="btn btn-primary" onclick="openModal('client')">+ Novo Cliente</button>
       </div>
+      <!-- Barra de filtros -->
+      <div style="display:flex; align-items:center; gap:12px; margin-bottom:20px; flex-wrap:wrap;">
+        <div class="period-switch" style="padding:3px; gap:2px;">
+          <button class="period-btn active" id="clientBtnAll"     onclick="setClientFilter('all',false)">Todos</button>
+          <button class="period-btn"        id="clientBtnRecorr"  onclick="setClientFilter('current',true)">Recorrentes</button>
+        </div>
+        <div id="clientMonthWrap" style="display:none; align-items:center; gap:8px;">
+          <span style="font-family:var(--mono); font-size:11px; color:var(--text-dim);">período:</span>
+          <select id="clientMonthSel" style="font-family:var(--mono); font-size:11px; padding:5px 8px; border:1px solid var(--border); border-radius:6px; background:var(--bg-elevated); color:var(--text); cursor:pointer;" onchange="onClientMonthChange(this.value)"></select>
+        </div>
+        <div id="clientFilterInfo" style="font-family:var(--mono); font-size:11px; color:var(--text-faint);"></div>
+      </div>
       <div class="table-wrap">
         <table>
           <thead>
@@ -2023,6 +2035,16 @@ tbody tr:last-child td { border-bottom: none; }
           <button class="btn" onclick="openModal('finance-in')">+ Receita</button>
           <button class="btn btn-primary" onclick="openModal('finance-out')">+ Despesa</button>
         </div>
+      </div>
+      <!-- Barra de filtros -->
+      <div style="display:flex; align-items:center; gap:12px; margin-bottom:20px; flex-wrap:wrap;">
+        <div class="period-switch" style="padding:3px; gap:2px;">
+          <button class="period-btn"        id="finBtnAll"     onclick="setFinanceFilter('all')">Todos</button>
+          <button class="period-btn active" id="finBtnCurrent" onclick="setFinanceFilter('current')">Este mês</button>
+          <button class="period-btn"        id="finBtnPrev"    onclick="setFinanceFilter('prev')">Mês ant.</button>
+        </div>
+        <select id="finMonthSel" style="font-family:var(--mono); font-size:11px; padding:5px 8px; border:1px solid var(--border); border-radius:6px; background:var(--bg-elevated); color:var(--text); cursor:pointer;" onchange="setFinanceFilter(this.value)"></select>
+        <div id="finFilterInfo" style="font-family:var(--mono); font-size:11px; color:var(--text-faint);"></div>
       </div>
 
       <div class="kpi-grid" id="financeKpis" style="margin-bottom: 28px;"></div>
@@ -2712,6 +2734,39 @@ function resetData() {
   location.reload();
 }
 
+// ============ FILTROS DE PERÍODO (Clientes + Financeiro) ============
+// Formato: 'all' | 'YYYY-MM' (mês específico)
+let financeMonthFilter = 'current'; // mês atual por padrão
+let clientMonthFilter  = 'current';
+let clientRecurringOnly = true;     // padrão: só recorrentes
+
+function monthFilterRange(filter) {
+  const today = new Date();
+  if (!filter || filter === 'all') return null; // sem filtro
+  let year, month;
+  if (filter === 'current') { year = today.getFullYear(); month = today.getMonth(); }
+  else if (filter === 'prev') { const d = new Date(today.getFullYear(), today.getMonth()-1, 1); year = d.getFullYear(); month = d.getMonth(); }
+  else { const parts = filter.split('-'); year = parseInt(parts[0]); month = parseInt(parts[1])-1; }
+  const start = new Date(year, month, 1);
+  const end   = new Date(year, month+1, 0);
+  return { start, end, label: start.toLocaleDateString('pt-BR',{month:'long',year:'numeric'}) };
+}
+
+function buildMonthOptions() {
+  const today = new Date();
+  const opts = [
+    { val:'all',     label:'Todos os meses' },
+    { val:'current', label:'Este mês' },
+    { val:'prev',    label:'Mês anterior' },
+  ];
+  // últimos 12 meses
+  for (let i = 2; i <= 11; i++) {
+    const d = new Date(today.getFullYear(), today.getMonth()-i, 1);
+    opts.push({ val: `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`, label: d.toLocaleDateString('pt-BR',{month:'long',year:'numeric'}) });
+  }
+  return opts;
+}
+
 // ============ GRÁFICO LINHA RECEITA × DESPESAS ============
 let chartPeriod = 'monthly'; // '7d' | '15d' | 'daily' | 'monthly' | 'yearly' | 'custom'
 let customRangeFrom = null;
@@ -2845,6 +2900,7 @@ function applyCalendar() {
   chartPeriod = 'custom';
   document.querySelectorAll('.period-btn').forEach(b => b.classList.toggle('active', b.dataset.period === 'custom'));
   renderLineChart();
+  renderOverview(); // sincroniza KPIs e Top Clientes com o período customizado
 }
 
 function renderCalendar() {
@@ -2974,6 +3030,54 @@ function makeDayBucket(d) {
     in: 0,
     out: 0
   };
+}
+
+// Retorna {start, end} como Date para o período ativo do gráfico
+// Usado para sincronizar o painel geral com o filtro de período
+function getActivePeriodRange() {
+  const today = new Date(); today.setHours(0,0,0,0);
+  let start, end;
+  if (chartPeriod === 'custom' && customRangeFrom && customRangeTo) {
+    start = new Date(customRangeFrom + 'T00:00:00');
+    end   = new Date(customRangeTo   + 'T00:00:00');
+  } else if (chartPeriod === '7d') {
+    start = new Date(today); start.setDate(start.getDate() - 6);
+    end   = today;
+  } else if (chartPeriod === '15d') {
+    start = new Date(today); start.setDate(start.getDate() - 14);
+    end   = today;
+  } else if (chartPeriod === 'daily') {
+    start = new Date(today); start.setDate(start.getDate() - 29);
+    end   = today;
+  } else if (chartPeriod === 'yearly') {
+    start = new Date(today.getFullYear(), today.getMonth() - 11, 1);
+    end   = today;
+  } else {
+    // monthly / mrr: mês atual completo
+    start = new Date(today.getFullYear(), today.getMonth(), 1);
+    end   = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+  }
+  return { start, end };
+}
+
+// Verifica se uma entrada paga cai dentro do range, usando getEffectiveDate
+function paidInRange(f, start, end) {
+  if (f.status !== 'paid') return false;
+  const d = new Date(getEffectiveDate(f) + 'T00:00:00');
+  return d >= start && d <= end;
+}
+
+// Label legível do período ativo
+function getActivePeriodLabel() {
+  const fmtD = d => new Date(d+'T00:00:00').toLocaleDateString('pt-BR',{day:'2-digit',month:'short'});
+  if (chartPeriod === 'custom' && customRangeFrom && customRangeTo) return `${fmtD(customRangeFrom)} – ${fmtD(customRangeTo)}`;
+  if (chartPeriod === '7d')     return 'últimos 7 dias';
+  if (chartPeriod === '15d')    return 'últimos 15 dias';
+  if (chartPeriod === 'daily')  return 'últimos 30 dias';
+  if (chartPeriod === 'yearly') return 'últimos 12 meses';
+  if (chartPeriod === 'mrr')    return 'mês atual · recorrente';
+  const today = new Date();
+  return today.toLocaleDateString('pt-BR',{month:'long', year:'numeric'});
 }
 
 function getPeriodBuckets(period) {
@@ -3272,6 +3376,7 @@ function setChartPeriod(period) {
   // fecha calendário se estiver aberto
   document.getElementById('calPopup')?.classList.remove('open');
   renderLineChart();
+  renderOverview(); // sincroniza KPIs e Top Clientes com o novo período
 }
 
 // ============ DONUT POR CATEGORIA ============
@@ -3368,65 +3473,52 @@ function renderOverview() {
   const currentMonth = today.getMonth();
   const currentYear = today.getFullYear();
 
-  // MRR: soma dos lançamentos recorrentes (recurring=yes, type=in) do mês mais recente com dados
-  const recurringIn = state.finance.filter(f => f.recurring === 'yes' && f.type === 'in');
-  const recurringMonths = [...new Set(recurringIn.map(f => {
-    const d = new Date(f.date + 'T00:00:00');
-    return d.getFullYear() * 100 + d.getMonth();
-  }))].sort((a,b) => b - a);
-  let monthRevenue = 0;
-  if (recurringMonths.length > 0) {
-    const top = recurringMonths[0];
-    const mY = Math.floor(top / 100), mM = top % 100;
-    monthRevenue = recurringIn
-      .filter(f => { const d = new Date(f.date + 'T00:00:00'); return d.getFullYear() === mY && d.getMonth() === mM; })
-      .reduce((s, f) => s + f.value, 0);
-  } else {
-    monthRevenue = state.clients.filter(c => c.status === 'active').reduce((s,c) => s + (c.fee||0), 0);
-  }
-  // A receber: entradas PENDENTES nos próximos 31 dias
+  // ── Período ativo (sincronizado com o seletor do gráfico) ──────────
+  const { start: pStart, end: pEnd } = getActivePeriodRange();
+  const periodLabel = getActivePeriodLabel();
+
+  // Receitas PAGAS no período
+  const paidInPeriod  = state.finance.filter(f => f.type==='in'  && paidInRange(f, pStart, pEnd)).reduce((s,f)=>s+f.value,0);
+  // Despesas PAGAS no período
+  const paidOutPeriod = state.finance.filter(f => f.type==='out' && paidInRange(f, pStart, pEnd)).reduce((s,f)=>s+f.value,0);
+  // A receber: PENDENTES nos próximos 31 dias (sempre forward-looking, independente do período)
   const next31 = new Date(today); next31.setDate(today.getDate() + 31);
-  const last30  = new Date(today); last30.setDate(today.getDate() - 30);
-  const monthIn = state.finance
+  const pendingIn = state.finance
     .filter(f=>f.type==='in'&&f.status==='pending')
     .filter(f=>{ const d=new Date(f.date+'T00:00:00'); return d>=today && d<=next31; })
     .reduce((s,f)=>s+f.value,0);
-  // Despesas PAGAS nos últimos 30 dias (caixa real saído)
-  const monthOut = state.finance
-    .filter(f=>f.type==='out'&&f.status==='paid')
-    .filter(f=>{ const d=new Date(getEffectiveDate(f)+'T00:00:00'); return d>=last30 && d<=today; })
-    .reduce((s,f)=>s+f.value,0);
-  // Receitas PAGAS nos últimos 30 dias (para Resultado)
-  const paidInLast30 = state.finance
-    .filter(f=>f.type==='in'&&f.status==='paid')
-    .filter(f=>{ const d=new Date(getEffectiveDate(f)+'T00:00:00'); return d>=last30 && d<=today; })
-    .reduce((s,f)=>s+f.value,0);
-  // Receitas pagas no mês corrente (subtítulo "A receber")
-  const paidIn = state.finance
-    .filter(f=>f.type==='in'&&f.status==='paid')
-    .filter(f=>{ const d=new Date(getEffectiveDate(f)+'T00:00:00'); return d.getMonth()===currentMonth&&d.getFullYear()===currentYear; })
-    .reduce((s,f)=>s+f.value,0);
+  // MRR: recorrentes do mês mais recente com dados
+  const recurringIn = state.finance.filter(f => f.recurring==='yes' && f.type==='in' && f.status==='paid');
+  const recurringMonths = [...new Set(recurringIn.map(f=>{const d=new Date(getEffectiveDate(f)+'T00:00:00');return d.getFullYear()*100+d.getMonth();}))].sort((a,b)=>b-a);
+  let monthRevenue = 0;
+  if (recurringMonths.length > 0) {
+    const top=recurringMonths[0]; const mY=Math.floor(top/100), mM=top%100;
+    monthRevenue = recurringIn.filter(f=>{const d=new Date(getEffectiveDate(f)+'T00:00:00');return d.getFullYear()===mY&&d.getMonth()===mM;}).reduce((s,f)=>s+f.value,0);
+  } else {
+    monthRevenue = state.clients.filter(c=>c.status==='active').reduce((s,c)=>s+(c.fee||0),0);
+  }
+  const margin = paidInPeriod > 0 ? Math.round((paidInPeriod - paidOutPeriod) / paidInPeriod * 100) : 0;
 
   document.getElementById('kpiGrid').innerHTML = `
     <div class="kpi featured">
       <div class="kpi-label">MRR · Recorrente</div>
       <div class="kpi-value money-mask">${fmtShort(monthRevenue)}</div>
-      <div class="kpi-trend">${recurringMonths.length > 0 ? 'base: lançamentos recorrentes' : 'base: fees cadastrados'} · ${state.clients.filter(c=>c.status==='active').length} clientes</div>
+      <div class="kpi-trend">${recurringMonths.length>0?'base: lançamentos recorrentes':'base: fees cadastrados'} · ${state.clients.filter(c=>c.status==='active').length} clientes</div>
     </div>
     <div class="kpi">
       <div class="kpi-label">A receber · 30d</div>
-      <div class="kpi-value success money-mask">${fmtShort(monthIn)}</div>
-      <div class="kpi-trend up">${paidIn>0?'R$'+Math.round(paidIn).toLocaleString('pt-BR')+' já recebido':'aguardando pagamentos'}</div>
+      <div class="kpi-value success money-mask">${fmtShort(pendingIn)}</div>
+      <div class="kpi-trend up">${pendingIn>0?'pendente nos próximos 30 dias':'aguardando pagamentos'}</div>
     </div>
     <div class="kpi">
-      <div class="kpi-label">Despesas · 30d</div>
-      <div class="kpi-value danger money-mask">${fmtShort(monthOut)}</div>
-      <div class="kpi-trend down">${monthOut>0?'saídas reais · últimos 30 dias':'sem despesas pagas'}</div>
+      <div class="kpi-label">Despesas · <span style="font-weight:400;opacity:.7">${periodLabel}</span></div>
+      <div class="kpi-value danger money-mask">${fmtShort(paidOutPeriod)}</div>
+      <div class="kpi-trend down">${paidOutPeriod>0?'saídas reais no período':'sem despesas no período'}</div>
     </div>
     <div class="kpi">
-      <div class="kpi-label">Resultado · 30d</div>
-      <div class="kpi-value money-mask ${paidInLast30-monthOut>=0?'success':'danger'}">${fmtShort(paidInLast30-monthOut)}</div>
-      <div class="kpi-trend">margem ${paidInLast30>0?Math.round((paidInLast30-monthOut)/paidInLast30*100):0}%</div>
+      <div class="kpi-label">Resultado · <span style="font-weight:400;opacity:.7">${periodLabel}</span></div>
+      <div class="kpi-value money-mask ${paidInPeriod-paidOutPeriod>=0?'success':'danger'}">${fmtShort(paidInPeriod-paidOutPeriod)}</div>
+      <div class="kpi-trend">receita ${fmtShort(paidInPeriod)} · margem ${margin}%</div>
     </div>
   `;
 
@@ -3467,15 +3559,28 @@ function renderOverview() {
   document.getElementById('alertCount').textContent = alerts.length;
   document.getElementById('alertsGrid').innerHTML = alerts.length ? alerts.map(a=>`<div class="alert ${a.type==='danger'?'danger':''}"><div class="alert-type">${a.kind}</div><div class="alert-title">${escapeHtml(a.title)}</div><div class="alert-meta">${a.meta}</div></div>`).join('') : '<div class="alert-empty">Tudo em dia — nenhum alerta no horizonte.</div>';
 
-  // top clients
-  const ranked = [...state.clients].filter(c=>c.status==='active').sort((a,b)=>b.fee-a.fee).slice(0,6);
-  const maxFee = ranked[0]?.fee || 1;
-  document.getElementById('topClientsBar').innerHTML = ranked.length ? ranked.map(c=>`<div class="bar-row"><div class="bar-label">${escapeHtml(c.name)}</div><div class="bar-track"><div class="bar-fill" style="width:${(c.fee/maxFee)*100}%"></div></div><div class="bar-value money-mask">${fmt(c.fee)}</div></div>`).join('') : '<div class="empty">Sem clientes ainda.</div>';
+  // top clients — receita real paga no período ativo
+  const clientRevPeriod = {};
+  state.finance.filter(f => f.type==='in' && f.clientId && paidInRange(f, pStart, pEnd))
+    .forEach(f => { clientRevPeriod[f.clientId] = (clientRevPeriod[f.clientId]||0) + f.value; });
+  const ranked = state.clients
+    .filter(c => c.status==='active')
+    .map(c => ({ ...c, periodRev: clientRevPeriod[c.id]||0 }))
+    .sort((a,b) => b.periodRev - a.periodRev)
+    .slice(0, 6);
+  const maxRev = ranked[0]?.periodRev || 1;
+  // atualiza título do bloco com o período
+  const topTitle = document.querySelector('.chart-title[style*="margin-bottom: 18px"]');
+  if (topTitle) topTitle.textContent = `Top clientes · ${periodLabel}`;
+  document.getElementById('topClientsBar').innerHTML = ranked.length
+    ? ranked.map(c => `<div class="bar-row"><div class="bar-label">${escapeHtml(c.name)}</div><div class="bar-track"><div class="bar-fill" style="width:${maxRev>0?(c.periodRev/maxRev)*100:0}%"></div></div><div class="bar-value money-mask">${c.periodRev>0?fmt(c.periodRev):'—'}</div></div>`).join('')
+    : '<div class="empty">Sem clientes ainda.</div>';
 
-  // concentração
-  const totalMRR = state.clients.filter(c=>c.status==='active').reduce((s,c)=>s+c.fee,0);
+  // concentração — usando receita real do período
+  const totalMRR = ranked.reduce((s,c)=>s+c.periodRev,0) || state.clients.filter(c=>c.status==='active').reduce((s,c)=>s+c.fee,0);
   const top = ranked[0];
-  const conc = top && totalMRR ? (top.fee/totalMRR*100) : 0;
+  const topVal = top?.periodRev || top?.fee || 0;
+  const conc = top && totalMRR ? (topVal/totalMRR*100) : 0;
   document.getElementById('concentrationStat').innerHTML = `
     <div style="font-size: 64px; font-weight: 700; letter-spacing: -0.04em; line-height: 1; color: ${conc>30?'var(--danger)':'var(--text)'}; margin-top:8px;">
       ${conc.toFixed(0)}<span style="font-size:28px; color:var(--text-faint); font-weight:400;">%</span>
@@ -3553,11 +3658,85 @@ function renderBillingTables() {
   }
 }
 
+// ============ FILTER CONTROLS ============
+function setFinanceFilter(val) {
+  financeMonthFilter = val;
+  ['finBtnAll','finBtnCurrent','finBtnPrev'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.remove('active');
+  });
+  if (val === 'all')     document.getElementById('finBtnAll')?.classList.add('active');
+  else if (val === 'current') document.getElementById('finBtnCurrent')?.classList.add('active');
+  else if (val === 'prev')    document.getElementById('finBtnPrev')?.classList.add('active');
+  const sel = document.getElementById('finMonthSel');
+  if (sel) sel.value = val;
+  renderFinance();
+}
+
+function setClientFilter(month, recurringOnly) {
+  clientMonthFilter  = month;
+  clientRecurringOnly = recurringOnly;
+  document.getElementById('clientBtnAll')?.classList.toggle('active', !recurringOnly);
+  document.getElementById('clientBtnRecorr')?.classList.toggle('active', recurringOnly);
+  const wrap = document.getElementById('clientMonthWrap');
+  if (wrap) wrap.style.display = recurringOnly ? 'flex' : 'none';
+  renderClients();
+}
+
+function onClientMonthChange(val) {
+  clientMonthFilter = val;
+  renderClients();
+}
+
+function initPageFilters() {
+  // Financeiro — popula select de meses
+  const finSel = document.getElementById('finMonthSel');
+  if (finSel) {
+    finSel.innerHTML = buildMonthOptions().map(o => `<option value="${o.val}">${o.label}</option>`).join('');
+    finSel.value = financeMonthFilter;
+  }
+  // Clientes — popula select de meses
+  const cliSel = document.getElementById('clientMonthSel');
+  if (cliSel) {
+    cliSel.innerHTML = buildMonthOptions().map(o => `<option value="${o.val}">${o.label}</option>`).join('');
+    cliSel.value = clientMonthFilter;
+  }
+}
+
 // ============ CLIENTS ============
 function renderClients() {
+  // Inicializa os selects de filtro se ainda não foram populados
+  initPageFilters();
+
+  const range = clientRecurringOnly ? monthFilterRange(clientMonthFilter) : null;
+
+  // Clientes a exibir: se filtro recorrente ativo, só os que têm lançamento recorrente+pago no período
+  let displayed = state.clients;
+  if (clientRecurringOnly) {
+    const clientsWithRecurring = new Set(
+      state.finance
+        .filter(f => f.type==='in' && f.recurring==='yes' && f.status==='paid' &&
+          (!range || (() => { const d = new Date(getEffectiveDate(f)+'T00:00:00'); return d >= range.start && d <= range.end; })()))
+        .map(f => f.clientId)
+        .filter(Boolean)
+    );
+    displayed = state.clients.filter(c => clientsWithRecurring.has(c.id));
+  }
+
+  // Atualiza info do filtro
+  const info = document.getElementById('clientFilterInfo');
+  if (info) {
+    if (clientRecurringOnly) {
+      const r = monthFilterRange(clientMonthFilter);
+      info.textContent = `${displayed.length} recorrente(s)${r ? ' · ' + r.label : ''}`;
+    } else {
+      info.textContent = `${displayed.length} cliente(s)`;
+    }
+  }
+
   const tbody = document.getElementById('clientsBody');
-  if (!state.clients.length) { tbody.innerHTML = '<tr><td colspan="8" class="empty">Nenhum cliente cadastrado ainda.</td></tr>'; return; }
-  tbody.innerHTML = state.clients.map(c => {
+  if (!displayed.length) { tbody.innerHTML = `<tr><td colspan="8" class="empty">${clientRecurringOnly ? 'Nenhum cliente recorrente neste período.' : 'Nenhum cliente cadastrado ainda.'}</td></tr>`; return; }
+  tbody.innerHTML = displayed.map(c => {
     const svcs = (c.services||[]).map(key => {
       const s = SERVICES.find(x => x.key === key);
       return s ? `<span class="svc-tag">${s.label}</span>` : '';
@@ -3581,21 +3760,38 @@ function renderClients() {
 
 // ============ FINANCE ============
 function renderFinance() {
-  const sorted = [...state.finance].sort((a,b)=>new Date(b.date)-new Date(a.date));
-  const totalIn = state.finance.filter(f=>f.type==='in'&&f.status==='paid').reduce((s,f)=>s+f.value,0);
-  const totalOut = state.finance.filter(f=>f.type==='out'&&f.status==='paid').reduce((s,f)=>s+f.value,0);
-  const pendingIn = state.finance.filter(f=>f.type==='in'&&f.status!=='paid').reduce((s,f)=>s+f.value,0);
+  initPageFilters();
+
+  const range = monthFilterRange(financeMonthFilter);
+
+  // Filtra entradas pelo período selecionado
+  const inRange = f => {
+    if (!range) return true;
+    const d = new Date((f.paidDate || f.date) + 'T00:00:00');
+    return d >= range.start && d <= range.end;
+  };
+
+  const filtered = [...state.finance].filter(inRange).sort((a,b)=>new Date(b.date)-new Date(a.date));
+  const allInRange = state.finance.filter(inRange);
+
+  const totalIn   = allInRange.filter(f=>f.type==='in' &&f.status==='paid').reduce((s,f)=>s+f.value,0);
+  const totalOut  = allInRange.filter(f=>f.type==='out'&&f.status==='paid').reduce((s,f)=>s+f.value,0);
+  const pendingIn = allInRange.filter(f=>f.type==='in' &&f.status!=='paid').reduce((s,f)=>s+f.value,0);
+
+  const periodInfo = range ? range.label : 'todos os lançamentos';
+  const infoEl = document.getElementById('finFilterInfo');
+  if (infoEl) infoEl.textContent = `${filtered.length} lançamento(s) · ${periodInfo}`;
 
   document.getElementById('financeKpis').innerHTML = `
-    <div class="kpi"><div class="kpi-label">Total Receitas</div><div class="kpi-value success money-mask">${fmtShort(totalIn)}</div></div>
-    <div class="kpi"><div class="kpi-label">Total Despesas</div><div class="kpi-value danger money-mask">${fmtShort(totalOut)}</div></div>
+    <div class="kpi"><div class="kpi-label">Receitas${range?' · '+range.label.split(' de ')[0]:''}</div><div class="kpi-value success money-mask">${fmtShort(totalIn)}</div></div>
+    <div class="kpi"><div class="kpi-label">Despesas${range?' · '+range.label.split(' de ')[0]:''}</div><div class="kpi-value danger money-mask">${fmtShort(totalOut)}</div></div>
     <div class="kpi featured"><div class="kpi-label">Saldo</div><div class="kpi-value money-mask">${fmtShort(totalIn-totalOut)}</div></div>
     <div class="kpi"><div class="kpi-label">A receber</div><div class="kpi-value money-mask">${fmtShort(pendingIn)}</div></div>
   `;
 
   const tbody = document.getElementById('financeBody');
-  if (!sorted.length) { tbody.innerHTML = '<tr><td colspan="7" class="empty">Nenhum lançamento ainda.</td></tr>'; return; }
-  tbody.innerHTML = sorted.map(f => {
+  if (!filtered.length) { tbody.innerHTML = '<tr><td colspan="7" class="empty">Nenhum lançamento neste período.</td></tr>'; return; }
+  tbody.innerHTML = filtered.map(f => {
     const client = state.clients.find(c=>c.id===f.clientId);
     const badge = {paid:'badge-paid',pending:'badge-pending',overdue:'badge-overdue'}[f.status];
     const label = {paid:'Pago',pending:'Pendente',overdue:'Atrasado'}[f.status];
