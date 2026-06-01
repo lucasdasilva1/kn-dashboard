@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Kronos.fy — Dashboard</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg viewBox='0 0 32 32' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Crect width='32' height='32' rx='7' fill='%230a0a0a'/%3E%3Cline x1='10' y1='8' x2='10' y2='24' stroke='%23d9f04e' stroke-width='2.5' stroke-linecap='round'/%3E%3Cline x1='10' y1='16' x2='22' y2='8' stroke='%23d9f04e' stroke-width='2.5' stroke-linecap='round'/%3E%3Cline x1='10' y1='16' x2='22' y2='24' stroke='%23d9f04e' stroke-width='2.5' stroke-linecap='round'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -11,14 +12,12 @@
 :root {
   --bg: #fafaf7;
   --bg-elevated: #ffffff;
-  --bg-card: #ffffff;
   --bg-subtle: #f4f4f0;
   --border: #e8e6e0;
   --border-strong: #d4d2cc;
   --text: #0a0a0a;
   --text-dim: #6b6b66;
   --text-faint: #a8a8a3;
-  --accent: #0a0a0a;
   --accent-soft: #1a1a1a;
   --highlight: #d9f04e;
   --danger: #d93030;
@@ -66,11 +65,6 @@ body {
   gap: 12px;
 }
 
-.logo-star {
-  width: 28px;
-  height: 28px;
-  flex-shrink: 0;
-}
 
 .logo-text {
   font-family: var(--sans);
@@ -1649,6 +1643,7 @@ tbody tr:last-child td { border-bottom: none; }
   display: flex;
   align-items: center;
   gap: 12px;
+  gap: 12px;
   margin-bottom: 36px;
 }
 
@@ -1775,6 +1770,12 @@ tbody tr:last-child td { border-bottom: none; }
 <div class="login-screen" id="loginScreen">
   <div class="login-box">
     <div class="login-logo">
+      <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" width="42" height="42" style="flex-shrink:0">
+        <rect width="32" height="32" rx="7" fill="#0a0a0a"/>
+        <line x1="10" y1="8"  x2="10" y2="24" stroke="#d9f04e" stroke-width="2.5" stroke-linecap="round"/>
+        <line x1="10" y1="16" x2="22" y2="8"  stroke="#d9f04e" stroke-width="2.5" stroke-linecap="round"/>
+        <line x1="10" y1="16" x2="22" y2="24" stroke="#d9f04e" stroke-width="2.5" stroke-linecap="round"/>
+      </svg>
       <div class="login-logo-text">KRONOS<span class="dim">.fy</span></div>
     </div>
     <div class="login-title">Acesso restrito</div>
@@ -1806,6 +1807,13 @@ tbody tr:last-child td { border-bottom: none; }
   <!-- SIDEBAR -->
   <aside class="sidebar">
     <div class="logo">
+      <!-- Logo mark -->
+      <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" width="30" height="30" style="flex-shrink:0">
+        <rect width="32" height="32" rx="7" fill="#0a0a0a"/>
+        <line x1="10" y1="8"  x2="10" y2="24" stroke="#d9f04e" stroke-width="2.5" stroke-linecap="round"/>
+        <line x1="10" y1="16" x2="22" y2="8"  stroke="#d9f04e" stroke-width="2.5" stroke-linecap="round"/>
+        <line x1="10" y1="16" x2="22" y2="24" stroke="#d9f04e" stroke-width="2.5" stroke-linecap="round"/>
+      </svg>
       <div class="logo-text">KRONOS<span class="dim">.fy</span></div>
     </div>
     <nav class="nav">
@@ -2299,15 +2307,8 @@ async function sha256(msg) {
   return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-// Utilitário público: use no console pra gerar o hash da sua senha
-// Exemplo: await gerarHashSenha('minha-senha-nova')
-window.gerarHashSenha = async function(senha) {
-  const h = await sha256(senha);
-  console.log('%c Hash gerado:', 'color:#2c8a4e; font-weight:bold;');
-  console.log(h);
-  console.log('%c Cole esse valor em AUTH_PASS_HASH no código.', 'color:#6b6b66;');
-  return h;
-};
+// Para gerar hash de nova senha no console:
+// (async()=>{ const b=new TextEncoder().encode('SUA_SENHA'); const h=await crypto.subtle.digest('SHA-256',b); console.log([...new Uint8Array(h)].map(x=>x.toString(16).padStart(2,'0')).join('')); })()
 
 // Verifica se há sessão ativa
 function isAuthenticated() {
@@ -2329,7 +2330,10 @@ function setAuthUI(authenticated) {
   }
 }
 
-// Handler do formulário de login
+// Proteção brute-force: máx 5 tentativas, lockout de 60s
+let _loginAttempts = 0;
+let _loginLockedUntil = 0;
+
 async function handleLogin(e) {
   e.preventDefault();
   const btn   = document.getElementById('loginBtn');
@@ -2337,19 +2341,37 @@ async function handleLogin(e) {
   const user  = document.getElementById('loginUser').value.trim();
   const pass  = document.getElementById('loginPass').value;
 
+  // Verifica lockout
+  const now = Date.now();
+  if (_loginLockedUntil > now) {
+    const secsLeft = Math.ceil((_loginLockedUntil - now) / 1000);
+    error.textContent = `Muitas tentativas. Aguarde ${secsLeft}s.`;
+    error.classList.add('visible');
+    return;
+  }
+
   btn.disabled = true;
   btn.textContent = 'Verificando…';
   error.classList.remove('visible');
 
-  // Pequeno delay artificial pra não permitir brute-force instantâneo
-  await new Promise(r => setTimeout(r, 600));
+  // Delay progressivo: aumenta com o número de tentativas
+  await new Promise(r => setTimeout(r, 400 + _loginAttempts * 300));
 
   const passHash = await sha256(pass);
 
   if (user === AUTH_USER && passHash === AUTH_PASS_HASH) {
+    _loginAttempts = 0;
     sessionStorage.setItem(AUTH_SESSION_KEY, 'ok');
     setAuthUI(true);
   } else {
+    _loginAttempts++;
+    if (_loginAttempts >= 5) {
+      _loginLockedUntil = Date.now() + 60000; // 60s lockout
+      _loginAttempts = 0;
+      error.textContent = 'Conta bloqueada por 60 segundos.';
+    } else {
+      error.textContent = `Credenciais inválidas. (${5 - _loginAttempts} tentativa(s) restante(s))`;
+    }
     error.classList.add('visible');
     document.getElementById('loginPass').value = '';
     document.getElementById('loginPass').focus();
@@ -2553,8 +2575,8 @@ function saveClient(e) { e.preventDefault();
   const data = {
     id,
     name:     document.getElementById('client-name').value,
-    fee:      parseFloat(document.getElementById('client-fee').value),
-    payday:   parseInt(document.getElementById('client-payday').value),
+    fee:      parseFloat(document.getElementById('client-fee').value)||0,
+    payday:   Math.max(1, Math.min(31, parseInt(document.getElementById('client-payday').value)||1)),
     budget:   parseFloat(document.getElementById('client-budget').value)||0,
     start:    document.getElementById('client-start').value,
     contact:  document.getElementById('client-contact').value,
@@ -3185,24 +3207,6 @@ function getPeriodBuckets(period) {
   return buckets;
 }
 
-// Gera path suave usando spline Catmull-Rom → Bezier cúbico
-function smoothCurve(pts, tension = 0.35) {
-  if (pts.length < 2) return '';
-  if (pts.length === 2) return `M ${pts[0].x} ${pts[0].y} L ${pts[1].x} ${pts[1].y}`;
-  let d = `M ${pts[0].x} ${pts[0].y}`;
-  for (let i = 0; i < pts.length - 1; i++) {
-    const p0 = pts[Math.max(0, i - 1)];
-    const p1 = pts[i];
-    const p2 = pts[i + 1];
-    const p3 = pts[Math.min(pts.length - 1, i + 2)];
-    const cp1x = p1.x + (p2.x - p0.x) * tension;
-    const cp1y = p1.y + (p2.y - p0.y) * tension;
-    const cp2x = p2.x - (p3.x - p1.x) * tension;
-    const cp2y = p2.y - (p3.y - p1.y) * tension;
-    d += ` C ${cp1x.toFixed(2)} ${cp1y.toFixed(2)}, ${cp2x.toFixed(2)} ${cp2y.toFixed(2)}, ${p2.x} ${p2.y}`;
-  }
-  return d;
-}
 
 function renderLineChart() {
   const svg = document.getElementById('lineChart');
@@ -3390,7 +3394,7 @@ function renderDonut() {
       const client = state.clients.find(c => c.id === f.clientId);
       const cat = (client && client.services && client.services.length > 0)
         ? client.services[0]
-        : (f.category || 'outro');
+        : (f.category || 'outros');
       byCat[cat] = (byCat[cat]||0) + f.value;
     });
 
@@ -3528,7 +3532,6 @@ function renderOverview() {
 
   // alerts — baseados em lançamentos PENDENTES reais (não em projeção de fee/payday)
   const alerts = [];
-  const next14 = new Date(today); next14.setDate(today.getDate() + 14);
   state.finance
     .filter(f => f.status === 'pending' || f.status === 'overdue')
     .forEach(f => {
@@ -3717,13 +3720,23 @@ function renderClients() {
 
   const range = clientRecurringOnly ? monthFilterRange(clientMonthFilter) : null;
 
-  // Clientes a exibir: se filtro recorrente ativo, só os que têm lançamento recorrente+pago no período
+  // Clientes recorrentes: inclui pagos (usando getEffectiveDate) E pendentes (usando date real)
   let displayed = state.clients;
   if (clientRecurringOnly) {
     const clientsWithRecurring = new Set(
       state.finance
-        .filter(f => f.type==='in' && f.recurring==='yes' && f.status==='paid' &&
-          (!range || (() => { const d = new Date(getEffectiveDate(f)+'T00:00:00'); return d >= range.start && d <= range.end; })()))
+        .filter(f => f.type === 'in' && f.recurring === 'yes')
+        .filter(f => {
+          if (!range) return true;
+          // Pagas: usa data efetiva corrigida (maio em vez de junho, etc.)
+          if (f.status === 'paid') {
+            const d = new Date(getEffectiveDate(f) + 'T00:00:00');
+            return d >= range.start && d <= range.end;
+          }
+          // Pendentes/atrasadas: usa data de vencimento real (para aparecer como "previsto")
+          const d = new Date(f.date + 'T00:00:00');
+          return d >= range.start && d <= range.end;
+        })
         .map(f => f.clientId)
         .filter(Boolean)
     );
@@ -3748,9 +3761,27 @@ function renderClients() {
       const s = SERVICES.find(x => x.key === key);
       return s ? `<span class="svc-tag">${s.label}</span>` : '';
     }).join('');
+
+    // Quando filtro recorrente ativo: mostra badge de pagamento do período
+    let recurBadge = '';
+    if (clientRecurringOnly && range) {
+      const entry = state.finance.find(f =>
+        f.type === 'in' && f.recurring === 'yes' && f.clientId === c.id &&
+        (() => {
+          const d = new Date((f.status === 'paid' ? getEffectiveDate(f) : f.date) + 'T00:00:00');
+          return d >= range.start && d <= range.end;
+        })()
+      );
+      if (entry) {
+        if (entry.status === 'paid')    recurBadge = '<span class="badge badge-paid" style="margin-left:8px;">Pago</span>';
+        else if (entry.status === 'pending') recurBadge = '<span class="badge badge-pending" style="margin-left:8px;">Pendente</span>';
+        else                                 recurBadge = '<span class="badge badge-overdue" style="margin-left:8px;">Atrasado</span>';
+      }
+    }
+
     return `
     <tr>
-      <td><strong>${escapeHtml(c.name)}</strong>${c.contact?`<br><span style="color:var(--text-dim); font-size:12px;">${escapeHtml(c.contact)}</span>`:''}</td>
+      <td><strong>${escapeHtml(c.name)}</strong>${recurBadge}${c.contact?`<br><span style="color:var(--text-dim); font-size:12px;">${escapeHtml(c.contact)}</span>`:''}</td>
       <td style="max-width:220px; line-height:1.8;">${svcs || '<span style="color:var(--text-faint); font-size:12px;">—</span>'}</td>
       <td class="cell-money money-mask">${fmt(c.fee)}</td>
       <td class="cell-mono">dia ${c.payday}</td>
@@ -3969,15 +4000,15 @@ function seedIfEmpty() {
       { type:'in', desc:'Consultoria avulsa', value: 1500, daysAgo: 8, category:'setup', clientId: null },
       { type:'in', desc:'Bônus performance Sorriso+', value: 600, daysAgo: 12, category:'mensalidade', clientId: state.clients[1].id },
       { type:'in', desc:'Setup express', value: 1800, daysAgo: 18, category:'setup', clientId: null },
-      { type:'in', desc:'Indicação convertida', value: 950, daysAgo: 22, category:'outro', clientId: null },
+      { type:'in', desc:'Indicação convertida', value: 950, daysAgo: 22, category:'outros', clientId: null },
       { type:'out', desc:'Tráfego pago Meta', value: 220, daysAgo: 1, category:'ferramentas', clientId: null },
       { type:'out', desc:'Editor de vídeo freela', value: 650, daysAgo: 3, category:'equipe', clientId: null },
       { type:'out', desc:'Almoço cliente', value: 180, daysAgo: 6, category:'marketing', clientId: null },
       { type:'out', desc:'Copywriter freela', value: 900, daysAgo: 9, category:'equipe', clientId: null },
       { type:'out', desc:'Anúncios LinkedIn (próprios)', value: 340, daysAgo: 14, category:'marketing', clientId: null },
       { type:'out', desc:'Notion Plus', value: 95, daysAgo: 17, category:'ferramentas', clientId: null },
-      { type:'out', desc:'Curso de tráfego', value: 497, daysAgo: 21, category:'outro', clientId: null },
-      { type:'out', desc:'Contador', value: 380, daysAgo: 26, category:'outro', clientId: null }
+      { type:'out', desc:'Curso de tráfego', value: 497, daysAgo: 21, category:'outros', clientId: null },
+      { type:'out', desc:'Contador', value: 380, daysAgo: 26, category:'outros', clientId: null }
     ];
     recentExtras.forEach(e => {
       const d = new Date(today); d.setDate(d.getDate() - e.daysAgo);
