@@ -3882,7 +3882,13 @@ function renderFinance() {
     const isProjected = f._projected;
     const badge = isProjected ? 'badge-pending' : ({paid:'badge-paid',pending:'badge-pending',overdue:'badge-overdue'}[f.status]);
     const label = isProjected ? 'Previsto' : ({paid:'Pago',pending:'Pendente',overdue:'Atrasado'}[f.status]);
-    const rowStyle = isProjected ? ' style="opacity:0.6; font-style:italic;"' : '';
+    const rowStyle = isProjected ? ' style="opacity:0.65;"' : '';
+    const confirmBtn = isProjected
+      ? `<button class="btn btn-primary" style="padding:5px 12px; font-size:12px; font-family:var(--mono);"
+           onclick="confirmProjection('${f.clientId}','${f.desc.replace(/'/g,"\\'")}',${f.value},'${f.date}','${f.category}')">
+           ✓ Confirmar pago
+         </button>`
+      : `<button class="action-btn" onclick="openModal('finance','${f.id}')">editar</button><button class="action-btn del" onclick="deleteItem('finance','${f.id}')">excluir</button>`;
     return `<tr${rowStyle}>
       <td class="cell-mono">${fmtDate(f.date)}</td>
       <td><strong>${isProjected ? f.desc : escapeHtml(f.desc)}</strong>${f.recurring==='yes'?'<span style="color:var(--text-dim); font-family:var(--mono); font-size:10px; margin-left:8px;">↻ RECORR</span>':''}</td>
@@ -3890,9 +3896,29 @@ function renderFinance() {
       <td>${client?escapeHtml(client.name):'—'}</td>
       <td class="cell-money money-mask ${f.type||'in'}">${'+'} ${fmt(f.value)}</td>
       <td><span class="badge ${badge}">${label}</span></td>
-      <td style="text-align:right; white-space:nowrap;">${isProjected ? '<span style="font-family:var(--mono);font-size:10px;color:var(--text-faint);">projeção</span>' : `<button class="action-btn" onclick="openModal('finance','${f.id}')">editar</button><button class="action-btn del" onclick="deleteItem('finance','${f.id}')">excluir</button>`}</td>
+      <td style="text-align:right; white-space:nowrap;">${confirmBtn}</td>
     </tr>`;
   }).join('');
+}
+
+// Confirma pagamento de uma projeção: cria lançamento real como pago e re-renderiza
+function confirmProjection(clientId, desc, value, date, category) {
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const entry = {
+    id: uid(),
+    type: 'in',
+    desc: desc,
+    value: value,
+    date: date,
+    paidDate: todayStr,
+    category: category,
+    clientId: clientId,
+    status: 'paid',
+    recurring: 'yes',
+  };
+  state.finance.push(entry);
+  save();
+  renderAll();
 }
 
 // ============ CRM ============
