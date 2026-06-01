@@ -3813,33 +3813,44 @@ function renderFinance() {
     return d >= range.start && d <= range.end;
   };
 
-  // Gera previsões de receita recorrente para clientes ativos sem lançamento no período
-  // (só quando há um período específico selecionado, não em "Todos")
+  // Gera previsões APENAS para clientes que têm histórico de lançamento recorrente real
+  // (não projeta para clientes que nunca tiveram recurring=yes no financeiro)
   const projections = [];
   if (range) {
-    const activeRecurringClients = state.clients.filter(c => c.status === 'active' && c.fee > 0);
-    activeRecurringClients.forEach(c => {
-      // Verifica se já existe lançamento recorrente para este cliente no período
-      const hasEntry = state.finance.some(f =>
-        f.type === 'in' && f.recurring === 'yes' && f.clientId === c.id &&
-        (() => { const d = new Date((f.paidDate || f.date) + 'T00:00:00'); return d >= range.start && d <= range.end; })()
-      );
-      if (!hasEntry) {
-        // Calcula data de vencimento no período (usando payday do cliente)
-        const dueDay = Math.min(c.payday || 1, new Date(range.end).getDate());
-        const dueDate = new Date(range.start.getFullYear(), range.start.getMonth(), dueDay);
-        projections.push({
-          _projected: true,
-          clientId: c.id,
-          desc: `Mensalidade ${c.name}`,
-          value: c.fee,
-          date: dueDate.toISOString().slice(0,10),
-          category: (c.services && c.services.length > 0) ? c.services[0] : 'mensalidade',
-          recurring: 'yes',
-          status: 'pending',
-        });
-      }
-    });
+    // Quais clientIds têm ao menos um lançamento recurring=yes no histórico?
+    const clientsWithRecurringHistory = new Set(
+      state.finance
+        .filter(f => f.type === 'in' && f.recurring === 'yes' && f.clientId)
+        .map(f => f.clientId)
+    );
+
+    state.clients
+      .filter(c => c.status === 'active' && clientsWithRecurringHistory.has(c.id))
+      .forEach(c => {
+        // Já tem algum lançamento (recorrente ou não) deste cliente no período? Não projeta.
+        const hasEntry = state.finance.some(f =>
+          f.type === 'in' && f.clientId === c.id &&
+          (() => { const d = new Date((f.paidDate || f.date) + 'T00:00:00'); return d >= range.start && d <= range.end; })()
+        );
+        if (!hasEntry) {
+          const dueDay = Math.min(c.payday || 1, new Date(range.end).getDate());
+          const dueDate = new Date(range.start.getFullYear(), range.start.getMonth(), dueDay);
+          // Busca a última entrada recorrente para pegar a descrição e valor reais
+          const lastRecurring = [...state.finance]
+            .filter(f => f.type === 'in' && f.recurring === 'yes' && f.clientId === c.id)
+            .sort((a, b) => new Date(b.paidDate || b.date) - new Date(a.paidDate || a.date))[0];
+          projections.push({
+            _projected: true,
+            clientId: c.id,
+            desc: lastRecurring ? lastRecurring.desc : `Mensalidade ${c.name}`,
+            value: lastRecurring ? lastRecurring.value : c.fee,
+            date: dueDate.toISOString().slice(0, 10),
+            category: lastRecurring ? lastRecurring.category : ((c.services && c.services.length > 0) ? c.services[0] : 'mensalidade'),
+            recurring: 'yes',
+            status: 'pending',
+          });
+        }
+      });
   }
 
   const filtered = [...state.finance].filter(inRange).sort((a,b)=>new Date(b.date)-new Date(a.date));
