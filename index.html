@@ -1807,13 +1807,6 @@ tbody tr:last-child td { border-bottom: none; }
   <!-- SIDEBAR -->
   <aside class="sidebar">
     <div class="logo">
-      <!-- Logo mark -->
-      <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" width="30" height="30" style="flex-shrink:0">
-        <rect width="32" height="32" rx="7" fill="#0a0a0a"/>
-        <line x1="10" y1="8"  x2="10" y2="24" stroke="#d9f04e" stroke-width="2.5" stroke-linecap="round"/>
-        <line x1="10" y1="16" x2="22" y2="8"  stroke="#d9f04e" stroke-width="2.5" stroke-linecap="round"/>
-        <line x1="10" y1="16" x2="22" y2="24" stroke="#d9f04e" stroke-width="2.5" stroke-linecap="round"/>
-      </svg>
       <div class="logo-text">KRONOS<span class="dim">.fy</span></div>
     </div>
     <nav class="nav">
@@ -3720,27 +3713,19 @@ function renderClients() {
 
   const range = clientRecurringOnly ? monthFilterRange(clientMonthFilter) : null;
 
-  // Clientes recorrentes: inclui pagos (usando getEffectiveDate) E pendentes (usando date real)
+  // "Recorrentes" = todos os clientes ativos com pelo menos 1 entrada recurring no histórico.
+  // O período não filtra/esconde clientes — serve só para mostrar o badge de status no período.
   let displayed = state.clients;
   if (clientRecurringOnly) {
-    const clientsWithRecurring = new Set(
+    const clientsWithAnyRecurring = new Set(
       state.finance
-        .filter(f => f.type === 'in' && f.recurring === 'yes')
-        .filter(f => {
-          if (!range) return true;
-          // Pagas: usa data efetiva corrigida (maio em vez de junho, etc.)
-          if (f.status === 'paid') {
-            const d = new Date(getEffectiveDate(f) + 'T00:00:00');
-            return d >= range.start && d <= range.end;
-          }
-          // Pendentes/atrasadas: usa data de vencimento real (para aparecer como "previsto")
-          const d = new Date(f.date + 'T00:00:00');
-          return d >= range.start && d <= range.end;
-        })
+        .filter(f => f.type === 'in' && f.recurring === 'yes' && f.clientId)
         .map(f => f.clientId)
-        .filter(Boolean)
     );
-    displayed = state.clients.filter(c => clientsWithRecurring.has(c.id));
+    // Mostra ativos com histórico recorrente. Se nenhum histórico, mostra ativos com fee > 0.
+    displayed = state.clients.filter(c =>
+      c.status === 'active' && (clientsWithAnyRecurring.has(c.id) || c.fee > 0)
+    );
   }
 
   // Atualiza info do filtro
@@ -3762,20 +3747,39 @@ function renderClients() {
       return s ? `<span class="svc-tag">${s.label}</span>` : '';
     }).join('');
 
-    // Quando filtro recorrente ativo: mostra badge de pagamento do período
+    // Badge de pagamento recorrente: busca entrada no período selecionado,
+    // ou no mês anterior se o período ainda não tiver entrada (ex: junho sem lançamento ainda)
     let recurBadge = '';
-    if (clientRecurringOnly && range) {
-      const entry = state.finance.find(f =>
+    if (clientRecurringOnly) {
+      const findEntry = (rng) => rng ? state.finance.find(f =>
         f.type === 'in' && f.recurring === 'yes' && f.clientId === c.id &&
         (() => {
           const d = new Date((f.status === 'paid' ? getEffectiveDate(f) : f.date) + 'T00:00:00');
-          return d >= range.start && d <= range.end;
+          return d >= rng.start && d <= rng.end;
         })()
-      );
+      ) : null;
+
+      let entry = findEntry(range);
+      // Se não achou no período atual, tenta o mês anterior (para mostrar status mais recente)
+      if (!entry && range) {
+        const prevFilter = clientMonthFilter === 'current' ? 'prev'
+          : clientMonthFilter === 'prev' ? null : null;
+        const prevRange = prevFilter ? monthFilterRange(prevFilter) : null;
+        if (prevRange) entry = findEntry(prevRange);
+      }
+      // Se ainda não achou, pega a entrada mais recente de qualquer mês
+      if (!entry) {
+        entry = state.finance
+          .filter(f => f.type === 'in' && f.recurring === 'yes' && f.clientId === c.id)
+          .sort((a, b) => new Date(getEffectiveDate(b)) - new Date(getEffectiveDate(a)))[0];
+      }
+
       if (entry) {
-        if (entry.status === 'paid')    recurBadge = '<span class="badge badge-paid" style="margin-left:8px;">Pago</span>';
+        if (entry.status === 'paid')         recurBadge = '<span class="badge badge-paid" style="margin-left:8px;">Pago</span>';
         else if (entry.status === 'pending') recurBadge = '<span class="badge badge-pending" style="margin-left:8px;">Pendente</span>';
         else                                 recurBadge = '<span class="badge badge-overdue" style="margin-left:8px;">Atrasado</span>';
+      } else {
+        recurBadge = '<span class="badge" style="margin-left:8px; opacity:.5;">Aguardando</span>';
       }
     }
 
@@ -3809,38 +3813,73 @@ function renderFinance() {
     return d >= range.start && d <= range.end;
   };
 
+  // Gera previsões de receita recorrente para clientes ativos sem lançamento no período
+  // (só quando há um período específico selecionado, não em "Todos")
+  const projections = [];
+  if (range) {
+    const activeRecurringClients = state.clients.filter(c => c.status === 'active' && c.fee > 0);
+    activeRecurringClients.forEach(c => {
+      // Verifica se já existe lançamento recorrente para este cliente no período
+      const hasEntry = state.finance.some(f =>
+        f.type === 'in' && f.recurring === 'yes' && f.clientId === c.id &&
+        (() => { const d = new Date((f.paidDate || f.date) + 'T00:00:00'); return d >= range.start && d <= range.end; })()
+      );
+      if (!hasEntry) {
+        // Calcula data de vencimento no período (usando payday do cliente)
+        const dueDay = Math.min(c.payday || 1, new Date(range.end).getDate());
+        const dueDate = new Date(range.start.getFullYear(), range.start.getMonth(), dueDay);
+        projections.push({
+          _projected: true,
+          clientId: c.id,
+          desc: `Mensalidade ${c.name}`,
+          value: c.fee,
+          date: dueDate.toISOString().slice(0,10),
+          category: (c.services && c.services.length > 0) ? c.services[0] : 'mensalidade',
+          recurring: 'yes',
+          status: 'pending',
+        });
+      }
+    });
+  }
+
   const filtered = [...state.finance].filter(inRange).sort((a,b)=>new Date(b.date)-new Date(a.date));
   const allInRange = state.finance.filter(inRange);
 
-  const totalIn   = allInRange.filter(f=>f.type==='in' &&f.status==='paid').reduce((s,f)=>s+f.value,0);
-  const totalOut  = allInRange.filter(f=>f.type==='out'&&f.status==='paid').reduce((s,f)=>s+f.value,0);
-  const pendingIn = allInRange.filter(f=>f.type==='in' &&f.status!=='paid').reduce((s,f)=>s+f.value,0);
+  const totalIn    = allInRange.filter(f=>f.type==='in' &&f.status==='paid').reduce((s,f)=>s+f.value,0);
+  const totalOut   = allInRange.filter(f=>f.type==='out'&&f.status==='paid').reduce((s,f)=>s+f.value,0);
+  const pendingIn  = allInRange.filter(f=>f.type==='in' &&f.status!=='paid').reduce((s,f)=>s+f.value,0);
+  const projTotal  = projections.reduce((s,f)=>s+f.value,0);
 
   const periodInfo = range ? range.label : 'todos os lançamentos';
   const infoEl = document.getElementById('finFilterInfo');
-  if (infoEl) infoEl.textContent = `${filtered.length} lançamento(s) · ${periodInfo}`;
+  if (infoEl) infoEl.textContent = `${filtered.length} lançamento(s)${projections.length ? ` + ${projections.length} previsão(ões)` : ''} · ${periodInfo}`;
 
   document.getElementById('financeKpis').innerHTML = `
     <div class="kpi"><div class="kpi-label">Receitas${range?' · '+range.label.split(' de ')[0]:''}</div><div class="kpi-value success money-mask">${fmtShort(totalIn)}</div></div>
     <div class="kpi"><div class="kpi-label">Despesas${range?' · '+range.label.split(' de ')[0]:''}</div><div class="kpi-value danger money-mask">${fmtShort(totalOut)}</div></div>
     <div class="kpi featured"><div class="kpi-label">Saldo</div><div class="kpi-value money-mask">${fmtShort(totalIn-totalOut)}</div></div>
-    <div class="kpi"><div class="kpi-label">A receber</div><div class="kpi-value money-mask">${fmtShort(pendingIn)}</div></div>
+    <div class="kpi"><div class="kpi-label">A receber${projTotal>0?' (+ prev.)':''}</div><div class="kpi-value money-mask">${fmtShort(pendingIn+projTotal)}</div></div>
   `;
 
   const tbody = document.getElementById('financeBody');
-  if (!filtered.length) { tbody.innerHTML = '<tr><td colspan="7" class="empty">Nenhum lançamento neste período.</td></tr>'; return; }
-  tbody.innerHTML = filtered.map(f => {
+
+  // Junta lançamentos reais + projeções (projeções no final, em itálico)
+  const allRows = [...filtered, ...projections];
+  if (!allRows.length) { tbody.innerHTML = '<tr><td colspan="7" class="empty">Nenhum lançamento neste período.</td></tr>'; return; }
+  tbody.innerHTML = allRows.map(f => {
     const client = state.clients.find(c=>c.id===f.clientId);
-    const badge = {paid:'badge-paid',pending:'badge-pending',overdue:'badge-overdue'}[f.status];
-    const label = {paid:'Pago',pending:'Pendente',overdue:'Atrasado'}[f.status];
-    return `<tr>
+    const isProjected = f._projected;
+    const badge = isProjected ? 'badge-pending' : ({paid:'badge-paid',pending:'badge-pending',overdue:'badge-overdue'}[f.status]);
+    const label = isProjected ? 'Previsto' : ({paid:'Pago',pending:'Pendente',overdue:'Atrasado'}[f.status]);
+    const rowStyle = isProjected ? ' style="opacity:0.6; font-style:italic;"' : '';
+    return `<tr${rowStyle}>
       <td class="cell-mono">${fmtDate(f.date)}</td>
-      <td><strong>${escapeHtml(f.desc)}</strong>${f.recurring==='yes'?'<span style="color:var(--text-dim); font-family:var(--mono); font-size:10px; margin-left:8px;">↻ RECORR</span>':''}</td>
-      <td><span style="color:var(--text-dim); font-family:var(--mono); font-size:11px; text-transform:uppercase;">${escapeHtml(f.category)}</span></td>
+      <td><strong>${isProjected ? f.desc : escapeHtml(f.desc)}</strong>${f.recurring==='yes'?'<span style="color:var(--text-dim); font-family:var(--mono); font-size:10px; margin-left:8px;">↻ RECORR</span>':''}</td>
+      <td><span style="color:var(--text-dim); font-family:var(--mono); font-size:11px; text-transform:uppercase;">${escapeHtml(f.category||'—')}</span></td>
       <td>${client?escapeHtml(client.name):'—'}</td>
-      <td class="cell-money money-mask ${f.type}">${f.type==='in'?'+':'−'} ${fmt(f.value)}</td>
+      <td class="cell-money money-mask ${f.type||'in'}">${'+'} ${fmt(f.value)}</td>
       <td><span class="badge ${badge}">${label}</span></td>
-      <td style="text-align:right; white-space:nowrap;"><button class="action-btn" onclick="openModal('finance','${f.id}')">editar</button><button class="action-btn del" onclick="deleteItem('finance','${f.id}')">excluir</button></td>
+      <td style="text-align:right; white-space:nowrap;">${isProjected ? '<span style="font-family:var(--mono);font-size:10px;color:var(--text-faint);">projeção</span>' : `<button class="action-btn" onclick="openModal('finance','${f.id}')">editar</button><button class="action-btn del" onclick="deleteItem('finance','${f.id}')">excluir</button>`}</td>
     </tr>`;
   }).join('');
 }
