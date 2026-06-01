@@ -3722,9 +3722,9 @@ function renderClients() {
         .filter(f => f.type === 'in' && f.recurring === 'yes' && f.clientId)
         .map(f => f.clientId)
     );
-    // Mostra ativos com histórico recorrente. Se nenhum histórico, mostra ativos com fee > 0.
+    // Mostra apenas clientes ativos com histórico de lançamento recorrente real
     displayed = state.clients.filter(c =>
-      c.status === 'active' && (clientsWithAnyRecurring.has(c.id) || c.fee > 0)
+      c.status === 'active' && clientsWithAnyRecurring.has(c.id)
     );
   }
 
