@@ -3381,17 +3381,17 @@ function setChartPeriod(period) {
 
 // ============ DONUT POR CATEGORIA ============
 function renderDonut() {
-  const today = new Date();
-  const currentMonth = today.getMonth();
-  const currentYear = today.getFullYear();
-
-  // Donut por serviço: usa MRR ativo de cada cliente (não filtra por mês — reflete portfólio atual)
+  // Donut: receita real paga no período ativo, agrupada por categoria/serviço
+  const { start: pStart, end: pEnd } = getActivePeriodRange();
   const byCat = {};
-  state.clients
-    .filter(c => c.status === 'active' && c.fee > 0)
-    .forEach(c => {
-      const cat = (c.services && c.services.length > 0) ? c.services[0] : 'mensalidade';
-      byCat[cat] = (byCat[cat]||0) + c.fee;
+  state.finance
+    .filter(f => f.type === 'in' && paidInRange(f, pStart, pEnd))
+    .forEach(f => {
+      const client = state.clients.find(c => c.id === f.clientId);
+      const cat = (client && client.services && client.services.length > 0)
+        ? client.services[0]
+        : (f.category || 'outro');
+      byCat[cat] = (byCat[cat]||0) + f.value;
     });
 
   const catLabels = {
@@ -3609,9 +3609,16 @@ function renderBillingTables() {
   const fmtDate = d => new Date(d + 'T00:00:00').toLocaleDateString('pt-BR', {day:'2-digit', month:'short', year:'2-digit'});
   const statusBadge = s => `<span class="badge ${s==='paid'?'badge-paid':s==='overdue'?'badge-overdue':'badge-pending'}">${s==='paid'?'Pago':s==='overdue'?'Atrasado':'Pendente'}</span>`;
 
+  // Filtra pelo período ativo do gráfico
+  const { start: pStart, end: pEnd } = getActivePeriodRange();
+  const inPeriod = f => {
+    const d = new Date((f.paidDate || f.date) + 'T00:00:00');
+    return d >= pStart && d <= pEnd;
+  };
+
   // ── Recorrentes ────────────────────────────────────────
   const recurring = [...state.finance]
-    .filter(f => f.recurring === 'yes' && f.type === 'in')
+    .filter(f => f.recurring === 'yes' && f.type === 'in' && inPeriod(f))
     .sort((a, b) => new Date(b.date) - new Date(a.date));
 
   const recurTotal = recurring.reduce((s, f) => s + f.value, 0);
@@ -3619,14 +3626,14 @@ function renderBillingTables() {
 
   const recurBody = document.getElementById('recurringTableBody');
   if (!recurring.length) {
-    recurBody.innerHTML = '<tr><td colspan="5" class="empty">Nenhum lançamento recorrente ainda.</td></tr>';
+    recurBody.innerHTML = '<tr><td colspan="5" class="empty">Nenhum recorrente neste período.</td></tr>';
   } else {
     recurBody.innerHTML = recurring.map(f => {
       const client = state.clients.find(c => c.id === f.clientId);
       return `<tr>
         <td><strong>${escapeHtml(client ? client.name : '—')}</strong></td>
         <td>${CAT[f.category] || f.category || '—'}</td>
-        <td style="font-family:var(--mono);font-size:12px;color:var(--text-dim)">${fmtDate(f.date)}</td>
+        <td style="font-family:var(--mono);font-size:12px;color:var(--text-dim)">${fmtDate(f.paidDate || f.date)}</td>
         <td class="cell-money in money-mask">+${fmt(f.value)}</td>
         <td>${statusBadge(f.status)}</td>
       </tr>`;
@@ -3635,7 +3642,7 @@ function renderBillingTables() {
 
   // ── Avulsos ───────────────────────────────────────────
   const avulso = [...state.finance]
-    .filter(f => f.recurring !== 'yes' && f.type === 'in')
+    .filter(f => f.recurring !== 'yes' && f.type === 'in' && inPeriod(f))
     .sort((a, b) => new Date(b.date) - new Date(a.date));
 
   const avulsoTotal = avulso.reduce((s, f) => s + f.value, 0);
@@ -3643,14 +3650,14 @@ function renderBillingTables() {
 
   const avulsoBody = document.getElementById('avulsoTableBody');
   if (!avulso.length) {
-    avulsoBody.innerHTML = '<tr><td colspan="5" class="empty">Nenhum serviço avulso ainda.</td></tr>';
+    avulsoBody.innerHTML = '<tr><td colspan="5" class="empty">Nenhum serviço avulso neste período.</td></tr>';
   } else {
     avulsoBody.innerHTML = avulso.map(f => {
       const client = state.clients.find(c => c.id === f.clientId);
       return `<tr>
         <td><strong>${escapeHtml(client ? client.name : '—')}</strong></td>
         <td style="color:var(--text-dim)">${escapeHtml(f.desc)}</td>
-        <td style="font-family:var(--mono);font-size:12px;color:var(--text-dim)">${fmtDate(f.date)}</td>
+        <td style="font-family:var(--mono);font-size:12px;color:var(--text-dim)">${fmtDate(f.paidDate || f.date)}</td>
         <td class="cell-money in money-mask">+${fmt(f.value)}</td>
         <td>${statusBadge(f.status)}</td>
       </tr>`;
