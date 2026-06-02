@@ -3813,11 +3813,10 @@ function renderFinance() {
     return d >= range.start && d <= range.end;
   };
 
-  // Gera previsões APENAS para clientes que têm histórico de lançamento recorrente real
-  // (não projeta para clientes que nunca tiveram recurring=yes no financeiro)
+  // ── Projeções de RECEITAS recorrentes ──────────────────────────────
+  // Apenas clientes com histórico real de recurring=yes
   const projections = [];
   if (range) {
-    // Quais clientIds têm ao menos um lançamento recurring=yes no histórico?
     const clientsWithRecurringHistory = new Set(
       state.finance
         .filter(f => f.type === 'in' && f.recurring === 'yes' && f.clientId)
@@ -3827,7 +3826,6 @@ function renderFinance() {
     state.clients
       .filter(c => c.status === 'active' && clientsWithRecurringHistory.has(c.id))
       .forEach(c => {
-        // Já tem algum lançamento (recorrente ou não) deste cliente no período? Não projeta.
         const hasEntry = state.finance.some(f =>
           f.type === 'in' && f.clientId === c.id &&
           (() => { const d = new Date((f.paidDate || f.date) + 'T00:00:00'); return d >= range.start && d <= range.end; })()
@@ -3835,42 +3833,73 @@ function renderFinance() {
         if (!hasEntry) {
           const dueDay = Math.min(c.payday || 1, new Date(range.end).getDate());
           const dueDate = new Date(range.start.getFullYear(), range.start.getMonth(), dueDay);
-          // Projeção usa o fee ATUAL do cliente (atualizado quando você editar o cadastro).
-          // Descrição e categoria vêm da última entrada recorrente histórica.
           const lastRecurring = [...state.finance]
             .filter(f => f.type === 'in' && f.recurring === 'yes' && f.clientId === c.id)
             .sort((a, b) => new Date(b.paidDate || b.date) - new Date(a.paidDate || a.date))[0];
           projections.push({
-            _projected: true,
-            clientId: c.id,
+            _projected: true, type: 'in', clientId: c.id,
             desc: lastRecurring ? lastRecurring.desc : `Mensalidade ${c.name}`,
-            value: c.fee, // sempre usa o fee atual — mude o cadastro para ajustar a projeção
+            value: c.fee,
             date: dueDate.toISOString().slice(0, 10),
-            category: lastRecurring ? lastRecurring.category : ((c.services && c.services.length > 0) ? c.services[0] : 'mensalidade'),
-            recurring: 'yes',
-            status: 'pending',
+            category: lastRecurring ? lastRecurring.category : ((c.services&&c.services.length>0)?c.services[0]:'mensalidade'),
+            recurring: 'yes', status: 'pending',
           });
         }
       });
+
+    // ── Projeções de DESPESAS recorrentes ────────────────────────────
+    // Agrupa despesas recorrentes únicas pelo par (desc+category+clientId)
+    const recurringExpenses = state.finance.filter(f => f.type === 'out' && f.recurring === 'yes');
+    // Pega a entrada mais recente de cada grupo único de despesa
+    const expenseGroups = {};
+    recurringExpenses.forEach(f => {
+      const key = `${f.desc}||${f.category}||${f.clientId||''}`;
+      if (!expenseGroups[key] || new Date(f.paidDate||f.date) > new Date(expenseGroups[key].paidDate||expenseGroups[key].date)) {
+        expenseGroups[key] = f;
+      }
+    });
+
+    Object.values(expenseGroups).forEach(lastExp => {
+      // Já tem despesa com a mesma desc no período? Não projeta.
+      const hasEntry = state.finance.some(f =>
+        f.type === 'out' && f.desc === lastExp.desc && f.recurring === 'yes' &&
+        (() => { const d = new Date((f.paidDate || f.date) + 'T00:00:00'); return d >= range.start && d <= range.end; })()
+      );
+      if (!hasEntry) {
+        // Usa mesmo dia do mês da última ocorrência
+        const lastDate = new Date((lastExp.paidDate || lastExp.date) + 'T00:00:00');
+        const dueDay   = Math.min(lastDate.getDate(), new Date(range.end).getDate());
+        const dueDate  = new Date(range.start.getFullYear(), range.start.getMonth(), dueDay);
+        projections.push({
+          _projected: true, type: 'out', clientId: lastExp.clientId || null,
+          desc: lastExp.desc,
+          value: lastExp.value,
+          date: dueDate.toISOString().slice(0, 10),
+          category: lastExp.category,
+          recurring: 'yes', status: 'pending',
+        });
+      }
+    });
   }
 
   const filtered = [...state.finance].filter(inRange).sort((a,b)=>new Date(b.date)-new Date(a.date));
   const allInRange = state.finance.filter(inRange);
 
-  const totalIn    = allInRange.filter(f=>f.type==='in' &&f.status==='paid').reduce((s,f)=>s+f.value,0);
-  const totalOut   = allInRange.filter(f=>f.type==='out'&&f.status==='paid').reduce((s,f)=>s+f.value,0);
-  const pendingIn  = allInRange.filter(f=>f.type==='in' &&f.status!=='paid').reduce((s,f)=>s+f.value,0);
-  const projTotal  = projections.reduce((s,f)=>s+f.value,0);
+  const totalIn      = allInRange.filter(f=>f.type==='in' &&f.status==='paid').reduce((s,f)=>s+f.value,0);
+  const totalOut     = allInRange.filter(f=>f.type==='out'&&f.status==='paid').reduce((s,f)=>s+f.value,0);
+  const pendingIn    = allInRange.filter(f=>f.type==='in' &&f.status!=='paid').reduce((s,f)=>s+f.value,0);
+  const projInTotal  = projections.filter(f=>f.type==='in').reduce((s,f)=>s+f.value,0);
+  const projOutTotal = projections.filter(f=>f.type==='out').reduce((s,f)=>s+f.value,0);
 
   const periodInfo = range ? range.label : 'todos os lançamentos';
   const infoEl = document.getElementById('finFilterInfo');
   if (infoEl) infoEl.textContent = `${filtered.length} lançamento(s)${projections.length ? ` + ${projections.length} previsão(ões)` : ''} · ${periodInfo}`;
 
   document.getElementById('financeKpis').innerHTML = `
-    <div class="kpi"><div class="kpi-label">Receitas${range?' · '+range.label.split(' de ')[0]:''}</div><div class="kpi-value success money-mask">${fmtShort(totalIn)}</div></div>
-    <div class="kpi"><div class="kpi-label">Despesas${range?' · '+range.label.split(' de ')[0]:''}</div><div class="kpi-value danger money-mask">${fmtShort(totalOut)}</div></div>
+    <div class="kpi"><div class="kpi-label">Receitas${range?' · '+range.label.split(' de ')[0]:''}</div><div class="kpi-value success money-mask">${fmtShort(totalIn)}${projInTotal>0?`<span style="font-size:14px;color:var(--text-faint);margin-left:6px;">+ ${fmtShort(projInTotal)} prev.</span>`:''}</div></div>
+    <div class="kpi"><div class="kpi-label">Despesas${range?' · '+range.label.split(' de ')[0]:''}</div><div class="kpi-value danger money-mask">${fmtShort(totalOut)}${projOutTotal>0?`<span style="font-size:14px;color:var(--text-faint);margin-left:6px;">+ ${fmtShort(projOutTotal)} prev.</span>`:''}</div></div>
     <div class="kpi featured"><div class="kpi-label">Saldo</div><div class="kpi-value money-mask">${fmtShort(totalIn-totalOut)}</div></div>
-    <div class="kpi"><div class="kpi-label">A receber${projTotal>0?' (+ prev.)':''}</div><div class="kpi-value money-mask">${fmtShort(pendingIn+projTotal)}</div></div>
+    <div class="kpi"><div class="kpi-label">A receber${projInTotal>0?' (+ prev.)':''}</div><div class="kpi-value money-mask">${fmtShort(pendingIn+projInTotal)}</div></div>
   `;
 
   const tbody = document.getElementById('financeBody');
@@ -3887,9 +3916,9 @@ function renderFinance() {
     // Botão de ação: projeção → confirmar pago | pago recorrente → reverter + editar | outros → editar/excluir
     const isRecurringPaid = !isProjected && f.status === 'paid' && f.recurring === 'yes';
     const confirmBtn = isProjected
-      ? `<button class="btn btn-primary" style="padding:5px 12px; font-size:12px; font-family:var(--mono);"
-           onclick="confirmProjection('${f.clientId}','${f.desc.replace(/'/g,"\\'")}',${f.value},'${f.date}','${f.category}')">
-           ✓ Confirmar pago
+      ? `<button class="btn ${f.type==='out'?'':'btn-primary'}" style="padding:5px 12px; font-size:12px; font-family:var(--mono); ${f.type==='out'?'border-color:var(--danger);color:var(--danger);':''}"
+           onclick="confirmProjection('${f.clientId||''}','${f.desc.replace(/'/g,"\\'")}',${f.value},'${f.date}','${f.category}','${f.type||'in'}')">
+           ✓ ${f.type==='out'?'Confirmar pago':'Confirmar pago'}
          </button>`
       : isRecurringPaid
         ? `<button class="action-btn" onclick="openModal('finance','${f.id}')">editar</button><button class="action-btn" style="color:var(--warn);" onclick="revertPayment('${f.id}')">reverter</button>`
@@ -3899,7 +3928,7 @@ function renderFinance() {
       <td><strong>${isProjected ? f.desc : escapeHtml(f.desc)}</strong>${f.recurring==='yes'?'<span style="color:var(--text-dim); font-family:var(--mono); font-size:10px; margin-left:8px;">↻ RECORR</span>':''}</td>
       <td><span style="color:var(--text-dim); font-family:var(--mono); font-size:11px; text-transform:uppercase;">${escapeHtml(f.category||'—')}</span></td>
       <td>${client?escapeHtml(client.name):'—'}</td>
-      <td class="cell-money money-mask ${f.type||'in'}">${'+'} ${fmt(f.value)}</td>
+      <td class="cell-money money-mask ${f.type||'in'}">${(f.type==='out'?'−':'+')} ${fmt(f.value)}</td>
       <td><span class="badge ${badge}">${label}</span></td>
       <td style="text-align:right; white-space:nowrap;">${confirmBtn}</td>
     </tr>`;
@@ -3909,21 +3938,19 @@ function renderFinance() {
 /// Confirma pagamento de uma projeção: abre o modal pré-preenchido para o usuário
 // confirmar/ajustar o valor antes de salvar (útil para clientes com valor variável).
 // O modal tem botão "Cancelar" para voltar sem salvar.
-function confirmProjection(clientId, desc, value, date, category) {
-  openModal('finance-in');
-  // Aguarda o modal renderizar e o select de clientes ser populado
+function confirmProjection(clientId, desc, value, date, category, type) {
+  const modalType = (type === 'out') ? 'finance-out' : 'finance-in';
+  openModal(modalType);
   setTimeout(() => {
     document.getElementById('finance-desc').value     = desc;
     document.getElementById('finance-value').value    = value;
-    document.getElementById('finance-date').value     = new Date().toISOString().slice(0,10); // data real do pagamento = hoje
+    document.getElementById('finance-date').value     = new Date().toISOString().slice(0,10);
     document.getElementById('finance-category').value = category;
     document.getElementById('finance-status').value   = 'paid';
     document.getElementById('finance-recurring').value= 'yes';
-    document.getElementById('finance-type').value     = 'in';
-    // Seleciona o cliente no dropdown (precisa acontecer depois do innerHTML do select)
+    document.getElementById('finance-type').value     = type || 'in';
     const sel = document.getElementById('finance-client');
     if (sel && clientId) sel.value = clientId;
-    // Foca no valor para facilitar ajuste (ex: Contas Disponíveis)
     document.getElementById('finance-value').select();
   }, 80);
 }
