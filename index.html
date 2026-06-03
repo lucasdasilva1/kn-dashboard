@@ -1892,8 +1892,8 @@ tbody tr:last-child td { border-bottom: none; }
                 </button>
               </div>
               <div class="chart-legend-top">
-                <span class="legend-in">Receita</span>
-                <span class="legend-out">Despesas</span>
+                <span class="legend-in">Receita · <span class="money-mask" id="chartLegendIn">—</span></span>
+                <span class="legend-out">Despesas · <span class="money-mask" id="chartLegendOut">—</span></span>
               </div>
 
               <!-- CALENDAR POPUP -->
@@ -3356,8 +3356,17 @@ function renderLineChart() {
     const fmtD = d => new Date(d+'T00:00:00').toLocaleDateString('pt-BR', {day:'2-digit', month:'short'});
     periodLabel = `${fmtD(customRangeFrom)} – ${fmtD(customRangeTo)}`;
   } else periodLabel = 'últimos 6 meses';
-  document.getElementById('chartTotalIn').textContent = fmtShort(totalIn);
-  document.getElementById('chartSubInfo').textContent = `${periodLabel} · margem ${totalIn > 0 ? Math.round((totalIn-totalOut)/totalIn*100) : 0}%`;
+  // Número principal: receita quando > 0, ou resultado quando há só despesas
+  const mainVal = totalIn > 0 ? totalIn : (totalOut > 0 ? -(totalOut) : 0);
+  document.getElementById('chartTotalIn').textContent = fmtShort(mainVal);
+  document.getElementById('chartTotalIn').style.color = mainVal < 0 ? 'var(--danger)' : '';
+  // Legenda com valores detalhados
+  const legIn  = document.getElementById('chartLegendIn');
+  const legOut = document.getElementById('chartLegendOut');
+  if (legIn)  legIn.textContent  = fmtShort(totalIn);
+  if (legOut) legOut.textContent = fmtShort(totalOut);
+  const margin = totalIn > 0 ? Math.round((totalIn-totalOut)/totalIn*100) : 0;
+  document.getElementById('chartSubInfo').textContent = `${periodLabel} · margem ${margin}%`;
 }
 
 function setChartPeriod(period) {
