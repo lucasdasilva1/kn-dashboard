@@ -2633,8 +2633,18 @@ function saveFinance(e) { e.preventDefault();
       paidDate = prev.paidDate || _shiftFutureToRecent(prev.date);
     }
   }
-  const data = { id, type: document.getElementById('finance-type').value, desc: document.getElementById('finance-desc').value, value: parseFloat(document.getElementById('finance-value').value), date: entryDate, category: document.getElementById('finance-category').value, clientId: document.getElementById('finance-client').value||null, status: newStatus, recurring: document.getElementById('finance-recurring').value, paidDate };
+  const data = { id, type: document.getElementById('finance-type').value, desc: document.getElementById('finance-desc').value, value: parseFloat(document.getElementById('finance-value').value)||0, date: entryDate, category: document.getElementById('finance-category').value, clientId: document.getElementById('finance-client').value||null, status: newStatus, recurring: document.getElementById('finance-recurring').value, paidDate };
   const idx = state.finance.findIndex(f=>f.id===id); if(idx>=0) state.finance[idx]=data; else state.finance.push(data);
+
+  // Se for receita recorrente paga com cliente vinculado, atualiza o fee do cliente
+  // para manter a projeção do próximo mês com o valor mais recente
+  if (data.type === 'in' && data.recurring === 'yes' && data.status === 'paid' && data.clientId) {
+    const client = state.clients.find(c => c.id === data.clientId);
+    if (client && client.fee !== data.value) {
+      client.fee = data.value;
+    }
+  }
+
   save(); closeModal(); renderAll();
 }
 function saveLead(e) { e.preventDefault();
