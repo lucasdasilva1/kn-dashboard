@@ -3592,23 +3592,27 @@ function renderMetaAdsAlerts() {
   const day   = today.getDate();
   const todayStr = today.toISOString().slice(0, 10); // YYYY-MM-DD
 
-  const active = META_ADS_ALERTS.filter(a => a.day === day);
+  // Modo prévia: ?preview-alerts na URL mostra todos os alertas
+  const preview = location.search.includes('preview-alerts');
+
+  const active = preview ? META_ADS_ALERTS : META_ADS_ALERTS.filter(a => a.day === day);
   if (!active.length) { el.innerHTML = ''; return; }
 
-  // Se o usuário já dispensou hoje, não mostra
-  if (localStorage.getItem(_metaAlertKey(todayStr)) === '1') {
+  // Se o usuário já dispensou hoje (e não está em prévia), não mostra
+  if (!preview && localStorage.getItem(_metaAlertKey(todayStr)) === '1') {
     el.innerHTML = '';
     return;
   }
 
-  el.innerHTML = active.map(a => `
+  el.innerHTML = (preview ? `<div style="font-family:var(--mono);font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.1em;margin-bottom:4px;">Prévia — como aparece nas datas certas</div>` : '')
+    + active.map(a => `
     <div class="metaads-alert ${a.type}">
       <span class="metaads-alert-icon">${a.icon}</span>
       <div class="metaads-alert-body">
-        <div class="metaads-alert-label">Meta Ads · Cartão</div>
+        <div class="metaads-alert-label">Meta Ads · Cartão · dia ${a.day}</div>
         <div class="metaads-alert-text">${a.text}</div>
       </div>
-      <button class="metaads-alert-dismiss" title="Dispensar por hoje" onclick="dismissMetaAlert('${todayStr}')">×</button>
+      ${!preview ? `<button class="metaads-alert-dismiss" title="Dispensar por hoje" onclick="dismissMetaAlert('${todayStr}')">×</button>` : ''}
     </div>
   `).join('');
 }
